@@ -1,2 +1,2 @@
-# UCM-BD
-Repo with files used in Big Data Master 2021/2022
+# Mater Big Data: Data Science - UCM 2021/2022
+Repo with files used during this course.
