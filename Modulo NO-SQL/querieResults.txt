@@ -1,0 +1,135 @@
+1
+{
+	"_id" : ObjectId("618d6bcd21630f6b8dd8e4a9"),
+	"Nombre" : "GeoGebra Calculadora Gráfica",
+	"Desarrollador/es" : "International GeoGebra Institute",
+	"Contenido" : "Calculadoras",
+	"Categoria" : "Educacion",
+	"Idioma" : "Multilingüe",
+	"Elementos desplegables" : "Si",
+	"Barra de accion" : "Si",
+	"Sistema de navegacion" : "Pestañas",
+	"Insercion de datos" : "Ambos",
+	"Transiciones entre pantallas" : "Si",
+	"Panel lateral" : "Si",
+	"Usabilidad" : "Alta",
+	"Calidad de la interfaz visual" : "Alta",
+	"Precio" : 0,
+	"Descargas" : 10000000,
+	"Tamaño" : 15,
+	"Valoraciones" : 39927,
+	"Media de las valoraciones" : 4.2
+}
+
+{
+	"_id" : ObjectId("618d6bcd21630f6b8dd8e4c3"),
+	"Nombre" : "Statistics Pro",
+	"Desarrollador/es" : "Rohit Mehta",
+	"Contenido" : "Informativas",
+	"Categoria" : "Personalizacion",
+	"Idioma" : "Ingles",
+	"Elementos desplegables" : "No",
+	"Barra de accion" : "Si",
+	"Sistema de navegacion" : "Accesos directos",
+	"Insercion de datos" : "Ninguno",
+	"Transiciones entre pantallas" : "Si",
+	"Panel lateral" : "Si",
+	"Usabilidad" : "Alta",
+	"Calidad de la interfaz visual" : "Alta",
+	"Precio" : 1.49,
+	"Descargas" : 1,
+	"Tamaño" : 11,
+	"Valoraciones" : 0,
+	"Media de las valoraciones" : null
+}
+
+2
+{
+	"Media total de las valoraciones del conjunto" : 4.101025641025641
+}
+
+3
+{
+	"Descargas totales del conjunto" : 17937735
+}
+
+4
+pain
+
+5
+pain
+
+6
+{
+	"Descargas totales" : [
+		{
+			"Aplicaciones de pago" : 117015
+		},
+		{
+			"Aplicaciones gratuitas" : 17820720
+		}
+	]
+}
+
+7
+/* 1 */
+{
+	"Media de comentarios" : {
+		"Aplicaciones con mas de 5000 descargas" : 1481
+	}
+},
+
+/* 2 */
+{
+	"Media de comentarios" : {
+		"Aplicaciones con menos de 5000 descargas" : 18
+	}
+}
+
+8
+{
+	"acknowledged" : true,
+	"matchedCount" : 18,
+	"modifiedCount" : 18
+}
+
+/* 1 createdAt:11/11/2021 20:15:25*/
+{
+	"_id" : ObjectId("618d6bcd21630f6b8dd8e3ef"),
+	"Nombre" : "Calculadora de estadística",
+	"Desarrollador/es" : "João gondim",
+	"Contenido" : "Calculadoras",
+	"Categoria" : "Educacion",
+	"Idioma" : [
+		"Ingles",
+		"Español",
+		"Frances",
+		"Hindi",
+		"Ruso",
+		"Italiano",
+		"Portugues",
+		"Aleman"
+	],
+	"Elementos desplegables" : "Si",
+	"Barra de accion" : "No",
+	"Sistema de navegacion" : "Accesos directos",
+	"Insercion de datos" : "Manual",
+	"Transiciones entre pantallas" : "Si",
+	"Panel lateral" : "Si",
+	"Usabilidad" : "Alta",
+	"Calidad de la interfaz visual" : "Alta",
+	"Precio" : 0,
+	"Descargas" : 100000,
+	"Tamaño" : 5.1,
+	"Valoraciones" : 2715,
+	"Media de las valoraciones" : 4.7
+},
+
+9 
+pain
+
+10 
+pain
+
+11 
+pain
