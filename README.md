@@ -12,6 +12,6 @@ Repository with all the exercises and projects carried out during the master's d
 
 Author: Miguel Moreno Mardones
 
-For more information about any aspect related to the code or use of the files do not hesitate to contact me.
+For more information about any aspect related to the code or files use do not hesitate to contact me.
 
 Cheers! :)
