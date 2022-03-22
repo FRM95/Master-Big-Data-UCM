@@ -1,4 +1,4 @@
 # Mater Big Data: Data Science UCM 2021/2022
-Repo with files used during this course.
+Repositorio con todas las prácticas y proyectos realizados durante el máster.
+Autor: Miguel Moreno Mardones
 
-Author: Miguel Moreno Mardones
