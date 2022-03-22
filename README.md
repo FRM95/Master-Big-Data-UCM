@@ -8,7 +8,7 @@ Para más información acerca de cualquier aspecto relacionado con el código o 
 Un saludo! :)
 
 # 
-Repository with all the exercises and projects carried out during the master's degree.
+Repository with all exercises and projects carried out during the master's degree.
 
 Author: Miguel Moreno Mardones
 
