@@ -1,5 +1,8 @@
 # Master Big Data: Data Science UCM 2021/2022
+
 Repositorio con todas las prácticas y proyectos realizados durante el máster.
+
+Lenguajes de programación utilizados: R, Python, SQL y JavaScript.
 
 Autor: Miguel Moreno Mardones
 
@@ -9,6 +12,8 @@ Un saludo! :)
 
 # 
 Repository with all exercises and projects carried out during the master's degree.
+
+Programming languages used: R, Python, SQL and JavaScript.
 
 Author: Miguel Moreno Mardones
 
