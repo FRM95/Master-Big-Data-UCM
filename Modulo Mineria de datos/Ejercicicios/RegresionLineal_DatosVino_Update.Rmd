@@ -1,0 +1,504 @@
+---
+title: "Regresión lineal Datos Vino"
+author: "Guillermo Villarino"
+date: "Otoño 2021"
+output: rmdformats::readthedown
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## Preliminares
+
+En este documento ajustaremos algunos modelos de regresión lineal a los datos sobre venta de vinos. Para ello, utilizamos el conjunto de datos que generamos tras la depuración, asegurando un conjunto de datos "limpios" y exentos de ciertos peligros. 
+
+En primer lugar se fija el directorio de trabajo donde tenemos las funciones y los datos.
+
+```{r directorio y funciones, echo=FALSE}
+# Fijar dierectorio de trabajo donde se encuentran funciones y datosvinoDep
+setwd('F:/Documentos/Master Comercio 2021-22')
+
+# Cargo las funciones que voy a utilizar después
+source("Funciones_R.R")
+```
+
+
+```{r paquetes, include=FALSE, echo=FALSE, message=FALSE, warning=FALSE}
+# Cargo las librerias que me van a hacer falta
+library(questionr)
+library(corrplot)
+library(caret)
+library(ggplot2)
+library(lmSupport)
+
+# Arboles de clasificación y regresión CART (Breiman)
+paquetes(c('rpart','gridExtra'))
+```
+
+Procedemos a la lectura de los datos depurados. Ya que vamos a hacer cosas como evaluación de las relaciones entre los predictores y la respuesta o creación masiva de transformaciones para< conseguir linealidad, lo mejor es separar las respuestas y quedarnos con el input depurado, de esta forma podemos aplicar una misma función a todo el conjunto sin peligro de transformar las respuestas y cosas raras que puedan suceder. 
+
+```{r lectura datos}
+# Parto de los datos sin atípicos ni ausentes guardados
+datos<-readRDS("F:/Documentos/Master Comercio 2021-22/PARTE I_Depuracion y Regresiones/Dia1_MD&Depuracion/datosVinoDep")
+
+varObjCont<-datos$varObjCont
+varObjBin<-datos$varObjBin
+input<-datos[,-(1:2)]
+```
+
+No es mala idea generar un par de variables de "control" para la evaluación de los efectos de los predictores frente a la respuesta. La idea es la siguiente: si generamos variables en el más estricto sentido aleatorio (por ejemplo siguiendo una distribución uniforme[0,1]) cualquier relación que estas presenten con la variable respuesta serán debidas puramente al azar, con lo que se pueden considerar relaciones espurias, es decir, falsas. 
+
+Por tanto, ya sea en la inspección preliminar de relaciones con la respuesta mediante correlación (relación lineal, válido para continua-continua) o VCramer (asociación en tablas de contingencia, válido para cruce de variables categóricas/nominales o continuas tramificadas) o bien en los propios modelos de regresión, las variables que presenten una menor relación con la respuesta que las variables de control, tendrán una sombra de sospecha sobre la veracidad de esa relación y probablemente serán descartadas, al menos en su estado original (siempre se pueden tratar de transformar, tramificar etc)
+
+```{r variables de control}
+# Creo la variable aleatoria
+input$aleatorio<-runif(nrow(input))
+
+input$aleatorio2<-runif(nrow(input))
+```
+
+## Estudio descriptivo de relaciones con la respuesta
+
+En este apartado intentaremos descubrir a priori las relaciones marginales de las variables con la variable objetivo para hacernos una idea de cuales de ellas serán potencialmente influyentes en los modelos de regresión que ajustemos. 
+
+```{r Vcramer, warning=FALSE}
+#Obtengo la importancia de las variables. 
+# Falla si hay alguna variable cuantitativa 
+# con menos de 6 valores diferentes
+graficoVcramer(input,varObjCont)
+```
+
+Aparecen las nominales y también prop_missings (algo que comprobaremos luego en modelo). A partir de acidez...las relaciones no son más fuertes que las debidas al azar (al menos a nivel marginal). Sospechamos que las demás variables tendrán baja influencia a no ser que se produzca efecto potenciador por la presencia conjunta de varios efectos en un mismo modelo (cosa que valoraremos llegado el momento).
+
+Vamos a ver gráficamente las relaciones de las nominales sobre la continua. Podemos hacer uso del boxplot e histograma para target binaria ya que en realidad tiene implementado una comparación de continua con categórica en gráfico. En este caso lo utilizaremos de manera inversa al especificado en la fórmula de la función, indicando primero la objetivo continua y luego la nominal del input.
+
+```{r boxplot continua frente a categorica}
+#Veo gráficamente el efecto de dos variables cualitativas sobre la binaria
+b1<-boxplot_targetbinaria(varObjCont,input$Region,"Region") #esta no influye
+b2<-boxplot_targetbinaria(varObjCont,input$Clasificacion,"Clasificacion") #esta sí influye
+b3<-boxplot_targetbinaria(varObjCont,input$Etiqueta,"Etiqueta") #esta sí influye
+
+h1<-hist_targetbinaria(varObjCont,input$Region,"Region") #esta no influye
+h2<-hist_targetbinaria(varObjCont,input$Clasificacion,"Clasificacion") #esta sí influye
+h3<-hist_targetbinaria(varObjCont,input$Etiqueta,"Etiqueta") #esta sí influye
+
+marrangeGrob(list(b1,b2,b3,h1,h2,h3),nrow = 3,ncol = 2)
+```
+
+A la vista de los gráficos, es evidente que el solapamiento de las distribuciones del beneficio del vino en relación a la región de origen del mismo indica la falta de influencia de la variable región en dicho beneficio, por lo que diremos que este predictor no tiene capacidad de discriminación frente a la respuesta y no será importante para el modelo. 
+
+En cambio, las variables clasificación y Etiqueta presentan distribuciones de beneficio muy distintas en sus categorías, por lo que estas categorías pueden servir para estimar dicho beneficio. Sospechamos que serán importantes de cara al modelado. 
+
+```{r correlaciones lineales}
+# Gráfico de correlaciones entre las variables continuas 
+corrplot(cor(cbind(varObjCont,Filter(is.numeric, input)), use="pairwise", method="pearson"), method = "number",type = "upper")
+
+# Nubes de puntos de variables continuas frente a respuesta continua
+psych::scatterHist(input$Acidez,varObjCont)
+psych::scatterHist(input$CalifProd_cont,varObjCont)
+```
+
+En el gráfico de correlaciones se intuye la baja relación lineal presente entre las variables del archivo 2 a 2. Esto nos hace pensar que las variables continuas, a diferencia de las categóricas, no van a tener demasiada influencia en los modelos de regresión frente a la respuesta (véase el poco color que presenta la fila 1). Por otro lado, podemos estar respirar con cierta tranquilidad ante el hecho de la baja relación entre los predictores (véase la ausencia de color en todo el gráfico), cosa que evitará problemas de colinealidad en los modelos. 
+
+Es evidente que, las relaciones de cada variable con su transformada han de ser muy elevadas, ya que hay un mecanismo que genera una en función exacta de la otra, por lo que esto es normal. 
+
+**Nota:** La principal precaución que hay que tener es no considerar un modelo completo con todas al mismo tiempo puesto que se pueden generar los problemas de colinealidad. Solamente utilizaremos el set completo de variables cuando hagamos un proceso de selección automática de variables, proceso en el cual se elegirán las que más R2 aporten al modelo. 
+
+### Transformaciones de las variables continuas
+
+El principal objetivo de las transformaciones de las variables continuas es conseguir linealidad frente a la variable objetivo. De esta forma se prueban las transformaciones típicas (log, exp, potencias y raíces) y se escoge aquella que mayor coeficiente de correlación presenta con la respuesta continua.
+
+```{r tranformaciones de continuas}
+#Busco las mejores transformaciones para las variables numéricas con respesto a los dos tipos de variables
+input_cont<-cbind(input,Transf_Auto(Filter(is.numeric, input),varObjCont))
+
+saveRDS(data.frame(input_cont,varObjCont),"todo_cont_Vino")
+```
+
+Podemos comprobar si las transformaciones han aumentado el valor de correlación lineal con la respuesta.
+
+```{r correlaciones tranformaciones}
+# Gráfico de correlaciones entre las variables continuas (incluidas transformaciones)
+corrplot(cor(cbind(varObjCont,Filter(is.numeric, input_cont)), use="pairwise", method="pearson"), method = "ellipse",type = "upper")
+```
+
+No parece que haya mejorado mucho...Este estudio nos lleva a pensar que las variables continuas no van a aportar mucho a nuestro modelo de regresión, si bien puede suceder que en presencia de otras variables (por ejemplo las categóricas) la influencia de éstas pueda aumentar debido al distinto comportamiento (pendiente) que presenten con la respuesta en los distintos grupos que forma la variable categórica. 
+
+Por este motivo, es positivo complementar este análisis descriptivo con la información que dan los modelos sobre la importancia de variables, ya que dentro de modelo, la influencia de la variable se entiende a niveles constantes de todas las demás presentes en el mismo. 
+
+En cualquier caso, una vía que se puede explorar aquí para conseguir mayor influencia de las continuas es intentar tramificarlas (pasarlas a categóricas) de tal manera que se puedan descubrir patrones muy alejados d la linealidad que esta puedan contener. En el mundo de la tramificación existen dos estrategias fundamentales, 
+
+1) tramos ad-hoc para una mejor interpretabilidad (por ejemplo tramos de edad acordes a los que se utilizan en las estadísticas oficiales) en los que normalmente se realizan particiones más o menos equidistantes o basadas en un fundamento anterior. 
+
+2) tramos que maximicen cierta relación con la variable objetivo. Se pueden generar los puntos de corte de la variable a tramificar tales que los grupos creados sean lo más distintos entre sí en distribución de la variable respuesta, con lo que se "aseguran" tramos con capacidad de discriminar frente al objetivo. Suelen funcionar bien este tipo de tramificaciones pero tienen cierto peligro de sobreajustar a los datos de entrenamiento...Una de las formas de hacerlo es mediante árboles de regresión/clasificación. 
+
+Un árbol realiza particiones binarias de las variables con la premisa de encontrar las mayores diferencias entre los grupos que va formando, justo lo que buscamos! 
+
+
+```{r tramificacion arboles}
+# Arbol para tramificar azucar
+tree_azucar<-rpart::rpart(varObjCont~Azucar, data = datos, cp=0.005)
+tree_azucar
+
+``` 
+
+Se puede observar que el árbol realiza 2 particiones binarias con cortes en 1.62 y 4.46, con lo que forma tres grupos o nodos finales (marcados con *). En cada linea se ve el punto de corte, número de observaciones que tiene cada nodo, la deviance que indica de alguna forma la dispersión de los datos y finalmente el valor medio de la respuesta/objetivo estimada para cada grupo (donde mayores diferencias revelan distintos comportamientos de los grupos frente a la objetivo).
+
+Vamos a crear la variable que propone el árbol, categórica con 3 niveles y los puntos de corte comentados. el argumento where del árbol contiene esta variable, pero sin las etiquetas apropiadas. Comprobamos y ponemos las correctas.
+
+```{r}
+# puntos de corte en 1.61 y 4.46. Tres grupos. 
+table(tree_azucar$where)
+
+# Los grupos están ya ordenados pero se llaman 3 4 y 5
+
+# Añadimos la variable tramificada al dataset
+input$Azucar_tree<-factor(tree_azucar$where)
+``` 
+
+**NOTA**: Aquí hay una errata en la asignación del verdadero nombre de los niveles del factor. Es bueno fijarse en la cantidad de observaciones de cada nivel. En nuestro caso tenemos que por debajo de nivel de azucar 1.62 tenemos 2271 observaciones, entre 1.62 y 4.45 tenemos 977 y en el rango de valores superiores tenemos 3117. Con lo cual parece que: 
+
+- El nivel llamado 3 corresponde con el rango de valores 1.62-4.45
+- El nivel llamado 4 corresponde a <1.62
+- El nivel llamado 5 es en realidad el rango >4.45
+
+
+```{r}
+# Cambiamos los niveles (los ordeno correctamente!!)
+levels(input$Azucar_tree) = c('1.62-4.45','<1.62','>4.45')
+
+# Comprobamos
+table(input$Azucar_tree)
+
+```
+```{r}
+# Ordenamos niveles
+input$Azucar_tree<-factor(input$Azucar_tree, levels = c('<1.62','1.62-4.45','>4.45'))
+
+# Comprobamos
+table(input$Azucar_tree)
+```
+
+Vamos a valorar la capacidad a priori de esta variable.
+
+```{r}
+boxplot_targetbinaria(varObjCont,input$Azucar_tree,"Azucar Tramificada")
+```
+
+El tramo de valores intermedios es claramente distinto a los otros. Existe cierta diferencia entre el 2 y el 3los extremos pero no queda claro si será significativa. Habrá que valorarlo en modelo.
+
+## Modelos de regresión lineal para la predicción del beneficio del vino
+
+En esta sección se ajustan distintos modelos de regresión lineal para predecir el beneficio de los vinos. En primer lugar tomamos la partición training (donde ajustamos el modelo) y test (donde probamos su capacidad).
+
+### Partición training-test
+
+```{r}
+## Comienzo con la regresión lineal
+todo<-data.frame(input,varObjCont)
+
+#Obtengo la partición
+set.seed(123456)
+trainIndex <- caret::createDataPartition(todo$varObjCont, p=0.8, list=FALSE)
+data_train <- todo[trainIndex,]
+data_test <- todo[-trainIndex,]
+
+summary(data_train$varObjCont)
+
+summary(data_test$varObjCont)
+```
+
+### Modelo completo de referencia
+
+Probamos primero con las variables continuas de erigen para las que tenemos otras posibilidades contempladas, en este caso Azucar y Calif_Prod.
+
+```{r}
+#Construyo un modelo preliminar con todas las variables
+modelo1<-lm(varObjCont~.- Azucar_tree- CalifProductor-ID ,data=data_train)
+summary(modelo1)
+
+Rsq(modelo1,"varObjCont",data_train)
+Rsq(modelo1,"varObjCont",data_test) 
+
+summary(input)
+```
+
+La variable Azucar original (continua) no influye en el modelo completo, con un p-vlaor de 0.6. Cambiamos esta por la tramificada.
+Por otro lado, la calificación del  productor en sentido continuo resulta muy significativa por lo que la mantenemos (se comprueba que funciona igual en términos de R2 que la categórica).
+
+```{r}
+modelo1_t<-lm(varObjCont~.- Azucar- CalifProductor-ID,data=data_train)
+summary(modelo1_t)
+
+Rsq(modelo1_t,"varObjCont",data_train)
+Rsq(modelo1_t,"varObjCont",data_test) 
+
+```
+
+El modelo mejora en todo, R2 ajustado (a pesar del aumento de 1 parámetro), significación de la variable y capacidad de generalización al test. Elegiremos quedarnos con esta variable tramificada en lugar de la original.
+
+```{r}
+# Nos fijamos en la importancia de las variables. Podemos sacar un gráfico 
+# que muestra lo que se pierde en R2 en train al quitarlas del modelo
+modelEffectSizes(modelo1_t)
+barplot(sort(modelEffectSizes(modelo1_t)$Effects[-1,4],decreasing =T),las=2, cex.names = 0.7,main="Importancia de las variables (R2)")
+```
+
+### Modelo con las variables más importantes según Vcramer
+
+```{r}
+modelo2<-lm(varObjCont~Clasificacion+Etiqueta+CalifProd_cont+prop_missings,data=data_train)
+summary(modelo2)
+Rsq(modelo2,"varObjCont",data_train)
+Rsq(modelo2,"varObjCont",data_test) 
+```
+
+### Modelo sin prop_missings
+
+```{r}
+#Pruebo un modelo con menos variables, basándome en la importancia de las variables
+modelo3<-lm(varObjCont~Clasificacion+Etiqueta+CalifProd_cont,data=data_train)
+summary(modelo3)
+Rsq(modelo3,"varObjCont",data_train)
+Rsq(modelo3,"varObjCont",data_test) 
+```
+
+### Modelo con Azucar_tree
+
+```{r}
+#Pruebo un modelo con Azucar tramificada
+modelo4<-lm(varObjCont~Clasificacion+Etiqueta+CalifProd_cont+Azucar_tree,data=data_train)
+summary(modelo4)
+Rsq(modelo4,"varObjCont",data_train)
+Rsq(modelo4,"varObjCont",data_test) 
+```
+
+### Modelo con alguna continua más
+
+Introducimos las continuas que resultaban significativas en el modelo completo para valorar si aportan algo significativo al R2.
+
+```{r}
+#Pruebo un modelo con menos variables, basándome en la importancia de las variables
+modelo5<-lm(varObjCont~Clasificacion+Etiqueta+CalifProd_cont+Azucar_tree+Acidez+ Alcohol+CloruroSodico,data=data_train)
+summary(modelo5)
+Rsq(modelo5,"varObjCont",data_train)
+Rsq(modelo5,"varObjCont",data_test) 
+```
+
+Parece que este modelo tiene menor capacidad de generalización al conjunto de test aunque lo hace mejor en training...habrá que verlo en validación cruzada.
+
+### Modelo con interacción Etiqueta-Clasificación
+
+Siendo variables que miden de alguna forma la calidad del vino, es posible que exista cierta interacción entre ellas, es decir que la pertenencia conjunta a determinada etiqueta y clasificación tenga efectos diferenciadores en el beneficio que produce el vino. 
+
+```{r}
+#Pruebo con una interaccion sobre el anterior
+modelo6<-lm(varObjCont~Clasificacion+Etiqueta+CalifProd_cont+Azucar_tree+Acidez+ Alcohol+CloruroSodico+Clasificacion:Etiqueta,data=data_train)
+summary(modelo6)
+Rsq(modelo6,"varObjCont",data_train)
+Rsq(modelo6,"varObjCont",data_test)
+```
+
+Llegados a este punto se observa que, si bien el modelo con la interacción es bastante bueno, tiene un cruce de categorías de la interacción que no contiene observaciones en data_train para poder ser estimado su parámetro...esto es un fallo en la especificación del modelo y será difícil mantenerlo tal cual puesto que a nivel interpretativo carece de la robustez necesaria. 
+
+Una estrategia que se puede seguir es unir alguna de las categorías implicadas en esta interacción peligrosa. En este caso podemos unir las categorías de clasificación más elevadas (se puede probar trabajando sobre las etiquetas!!).
+
+Cuando hacemos lago así, hay que tener la precaución de hacer el cambio en el dataset completo y volver a generar la partición para que los datos se actualicen en training y también en test. 
+
+Actualizaremos el último modelo con esta unión de categorías.
+
+```{r junto niveles de clasificacion}
+
+# Junto las categorías *** y **** ya que tienen un comportamiento en el mismo sentido
+todo$Clasificacion_r<-car::recode(todo$Clasificacion, "c('***','****')='***+'")
+
+# Vuelvo a generar la partición para que los cambios se reflejen en ella
+data_train <- todo[trainIndex,]
+data_test <- todo[-trainIndex,]
+
+modelo7<-lm(varObjCont~Clasificacion_r+Etiqueta+CalifProd_cont+Azucar_tree+Acidez+ Alcohol+CloruroSodico+Clasificacion_r:Etiqueta,data=data_train)
+summary(modelo7)
+
+```
+
+**Decisiones en este punto**: Es evidente que el modelo 6 funciona mejor con la unión de las categorías de clasificación. Ahora bien, no sabemos si los modelos anteriores se benefician o no de este cambio. Lo que podríamos hacer en este punto actualizarlos y compararlos con los originales (yo he comprobado el peor nivel de R2 ajustado, con lo cual seguimos)
+
+```{r}
+# eLIMINO LAS CONTINUAS QUE NO PARECÍAN APORTAR MUCHO
+modelo8<-lm(varObjCont~Clasificacion_r+Etiqueta+CalifProd_cont+Azucar_tree+Clasificacion_r:Etiqueta,data=data_train)
+summary(modelo8)
+Rsq(modelo8,"varObjCont",data_train)
+Rsq(modelo8,"varObjCont",data_test)
+```
+
+## Comparación por validación cruzada
+
+Una vez explorados varios modelos manuales, es bueno comprobar sus capacidades en un esquema de validación cruzada repetida con la intención de comprobar su estabilidad ante el remuestreo. 
+
+El objetivo fundamental en esta parte es seleccionar el mejor modelo en relación sesgo-varianza y complejidad. 
+
+```{r valicaion cruzada, warning=FALSE}
+#Hago validación repetida para ver qué modelo es mejor
+modelo1VC <- caret::train(formula(modelo1_t),
+                   data = todo,method = "lm",
+                   trControl = trainControl(method="repeatedcv", number=5, repeats=20, returnResamp="all")
+)
+
+modelo2VC <- train(formula(modelo2),
+                   data = todo,method = "lm",
+                   trControl = trainControl(method="repeatedcv", number=5, repeats=20, returnResamp="all")
+)
+
+modelo3VC <- train(formula(modelo3),
+                   data = todo,method = "lm",
+                   trControl = trainControl(method="repeatedcv", number=5, repeats=20, returnResamp="all")
+)
+
+modelo4VC <- train(formula(modelo4),
+                   data = todo,method = "lm",
+                   trControl = trainControl(method="repeatedcv", number=5, repeats=20, returnResamp="all")
+)
+
+modelo5VC <- train(formula(modelo5),
+                   data = todo,method = "lm",
+                   trControl = trainControl(method="repeatedcv", number=5, repeats=20, returnResamp="all")
+)
+
+modelo6VC <- train(formula(modelo6),
+                   data = todo,method = "lm",
+                   trControl = trainControl(method="repeatedcv", number=5, repeats=20, returnResamp="all")
+)
+
+modelo7VC <- train(formula(modelo7),
+                   data = todo,method = "lm",
+                   trControl = trainControl(method="repeatedcv", number=5, repeats=20, returnResamp="all")
+)
+
+modelo8VC <- train(formula(modelo8),
+                   data = todo,method = "lm",
+                   trControl = trainControl(method="repeatedcv", number=5, repeats=20, returnResamp="all")
+)
+
+```
+
+Una vez generados los 100 modelos por fórmula con distintas particiones de trainig test bajo un esquema de validación cruzada repetida 5 Folds 20 Repeats, juntamos los resultados de los "resamples" en un dataset para generar el gráfico de boxplots de las distribuciones de R2 a través de los modelos y valorar la relación sesgo-varianza.
+
+```{r resumen modelos cv}
+results<-data.frame(rbind(modelo1VC$resample,modelo2VC$resample,modelo3VC$resample,modelo4VC$resample,
+                          modelo5VC$resample,modelo6VC$resample,modelo7VC$resample,modelo8VC$resample),
+                    modelo=c(rep(1,100),rep(2,100),rep(3,100),rep(4,100),
+                              rep(5,100),rep(6,100),rep(7,100),rep(8,100)))
+boxplot(Rsquared~modelo,data=results)
+aggregate(Rsquared~modelo, data = results, mean) #el 4 tiene mayor R2 medio
+aggregate(Rsquared~modelo, data = results, sd) #tb tiene mayor variabilidad
+```
+
+```{r}
+length(coef(modelo1_t));length(coef(modelo2));length(coef(modelo3));length(coef(modelo4))
+length(coef(modelo5));length(coef(modelo6));length(coef(modelo7));length(coef(modelo8))
+
+```
+
+En este punto hay que decidir un modelo final. Cosa que no es fácil en este caso. 
+
+Es evidente que el modelo que mejor capacidad predictiva presenta en relación sesgo-varianza es el modelo6, aquel que tiene la interacción con categorías vacías...Esto a nivel interpretativo es muy difícil de justificar ya que no se podrá cuantificar la influencia de la pertenencia conjunta a las categorías **** y etiqueta MM... Esto hace que el modelo sea ciertamente inconsistente. 
+
+Ante esta revelación y teniendo en cuenta que el aumento en R2 es del orden de milésimas en relación a los más cercanos (7 y 8 con interacciones pero con categorías unidas si variables continuas y con ellas), será más prudente desechar este modelo y escoger algún otro.
+
+Valorando la relación entre los modelos con y sin interacciones, el aumento del R2 se sitúa en torno a 2 centésimas pero el número de parámetros se dobla prácticamente...En este sentido, si valoramos la interpretabilidad por encima de un pequeño aumento de la capacidad predictiva, escogeríamos el modelo 4 o 5 que no tiene esta interacción con efectos masivos y un R2 un poco por debajo. 
+
+En caso de preferir la mejor capacidad predictiva habría que luchar la interpretación del modelo complejo.
+
+En nuestro caso preferiremos el modelo competitivo más simple, el modelo 4 con 12 parámetros y R2 de 0.473 en cv.
+
+```{r resumen metricas en train test}
+#Evaluamos la estabilidad del modelo a partir de las diferencias en train y test:
+Rsq(modelo4,"varObjCont",data_train)
+Rsq(modelo4,"varObjCont",data_test) 
+```
+
+```{r importancia de variables}
+# Vemos las variables más importantes del modelo ganador
+modelEffectSizes(modelo4)
+barplot(sort(modelEffectSizes(modelo4)$Effects[-1,4],decreasing =T),las=1, cex.names = 0.7,main="Importancia de las variables modelo 4 (R2)")
+```
+
+La variable más importante es clasificación con mucha diferencia
+
+## Ajuste del modelo final. Interpretación de parámetros
+
+Una vez escogido el modelo final. Hay que interpretar sus parámetros teniendo en cuenta que la estimación más robusta de los mismos será la que se obtiene utilizando el datset completo y no solamente las instancias del conjunto de training.
+
+De esta forma, se ajusta el modelo 4 a los datos completos.
+
+**NOTA**: Es útil poder cambiar los niveles de referencia de los factores (variables categóricas o nominales) incluídas en el modelo para una interpretación más cómoda o que se adecúa mejor a la realidad de los datos. Para ello, podemos hacer uso de la función *relevel()*
+
+```{r}
+
+# Clasificación con nivel de referencia *
+todo$Clasificacion <- relevel(todo$Clasificacion, ref = "*")
+#todo$Etiqueta <- relevel(todo$Etiqueta, ref = "MM")
+
+# Para etiqueta utilizamos volvemos a especificar orden de niveles si es que el cambio que hicimos en el script de depuración no se ha conservado
+todo$Etiqueta<-factor(todo$Etiqueta, levels = c('MM','M','R','B','MB'))
+
+```
+
+
+```{r interpretacion coeficientes}
+modeloFinal<-lm(formula(modelo4),data=todo)
+summary(modeloFinal)
+```
+
+```{r}
+
+# Clasificación con nivel de referencia *
+todo$Azucar_tree <- relevel(todo$Azucar_tree, ref = "1.62-4.45")
+#todo$Etiqueta <- relevel(todo$Etiqueta, ref = "MM")
+
+modeloFinal2<-lm(formula(modelo4),data=todo)
+summary(modeloFinal2)
+```
+
+**NOTA**: Llegados a este punto, observamos que la categoría de azucar mayor que 4.45 no parece significativamente distinta (en cuanto a efecto sobre la variable respuesta) que la categoría de referencia (<1.62). Podemos fijar el nivel de referencia en valores intermedios y volver a evaluar.
+
+Ahora las categorías son significativas, es decir hay diferencia entre ambos niveles y el de referencia pero los estimadores son muy parecidos, 44.295 y 45.200, lo que implica que el efecto de tener azucar alta o baja es prácticamente el mismo en cuanto a beneficio (siempre en relación a tener azucar "medio" y a constancia de las demás caratcerísticas, claro!). Entonces aqui podemos plantearnos si merece la pena conservar la variable con 3 tramos y capturar esas pequeñas diferencias (1€) entre el efecto de vinos de azucar alto y bajo (un parámetro más en modelo), o por el contrario, unir niveles (variable tramificada ya no ordinal...) y quedarnos con la diferencia entre vinos de azucar "medio" y "alto/bajo". 
+
+
+```{r}
+
+# Clasificación con nivel de referencia *
+todo$Azucar_tree <- car::recode(todo$Azucar_tree, "c('<1.62','>4.45') = '<1.62|>4.45'")
+#todo$Etiqueta <- relevel(todo$Etiqueta, ref = "MM")
+
+modeloFinal3<-lm(formula(modelo4),data=todo)
+summary(modeloFinal3)
+```
+
+La diferencia es prácticamente inapreciable en el modelo. El R2 ajustado aumenta una diezmilésima...poca cosa. Cuaquiera de las elecciones podría ser válida y depende de la conveniencia a la hora de interpretar.
+
+Decidimos conservar esa pequeña diferencia entre vinos de azucar alto y bajo para tener una interpetación más ordinal de esta característica. Con lo cual escogemos el modeloFinal2. 
+
+```{r}
+summary(modeloFinal2)
+```
+
+
+Conclusiones que podemos sacar:
+
+1) Los vinos con clasificación **** tienen un beneficio estimado *344.957 unidades superior* a los vinos de clasificación *.
+
+2) El beneficio estimado de los vinos de clasificación desconocida es *205.423 unidades inferior* al de los vinos con *.
+
+3) El beneficio estimado de los vinos de Etiqueta MB, es *274.616 unidades mayor* que el de los vinos con etiqueta MM.
+
+4) El aumento unitario de la calificación del productor, produce una *disminución del precio del vino de 31.435 unidades*. Puede resutar sorprendente pero hay que tener en cuenta que la variación es a un nivel marginal, con lo cual se valora que pasa con el aumento unitario de la calificación del propio productor para vinos con la misma clasificación, etiqueta y nivel de azucar tramificado.
+
+5) Los vinos con nivel de azúcar *menor que 1.62*, tienen un beneficio estimado *44.295 unidades mayor *que el estimado para los vinos con niveles de azúcar entre 1.62 y 4.45, mientras este incremento del precio es de *45.200 para los vinos de más de 4.45 de nivel de azúcar*. 
+
+Todas estas afirmaciones se hacen a constancia de todas las demás variables involucradas en el modelo (ceteris paribus), es decir, se valora el cambio marginal que tiene cada variable para valores fijos de todas las demás. 
+
+Así, ese aumento en los vinos de **** se da en aquellos que tienen la misma etiqueta, misma calificación del productor y mismo nivel de azúcar. 
+
+

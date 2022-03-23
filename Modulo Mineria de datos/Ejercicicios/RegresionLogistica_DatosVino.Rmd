@@ -1,0 +1,536 @@
+---
+title: "Regresión logística Datos Vino"
+author: "Guillermo Villarino"
+date: "Otoño 2021"
+output: rmdformats::readthedown
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## Preliminares
+
+En este documento ajustaremos algunos modelos de regresión logística a los datos sobre venta de vinos. Para ello, utilizamos el conjunto de datos que generamos tras la depuración, asegurando un conjunto de datos "limpios" y exentos de ciertos peligros. 
+
+En primer lugar se fija el directorio de trabajo donde tenemos las funciones y los datos.
+
+```{r directorio y funciones, echo=FALSE, warning=F}
+# Fijar dierectorio de trabajo donde se encuentran funciones y datosvinoDep
+setwd('F:/Documentos/Master Comercio 2021-22')
+
+# Cargo las funciones que voy a utilizar después
+source("Funciones_R.R")
+
+datos<-readRDS("PARTE I_Depuracion y Regresiones/Dia1_MD&Depuracion/datosVinoDep")
+```
+
+
+```{r paquetes, include=FALSE, echo=FALSE, message=FALSE, warning=FALSE}
+
+# Utilizamos la función paquetes
+# para instalar/cargar las librerías
+paquetes(c('questionr','psych','car','corrplot','caret', 
+           'ggplot2', 'lmSupport','pROC','gridExtra'))
+
+```
+
+Procedemos a la lectura de los datos depurados. Ya que vamos a hacer cosas como evaluación de las relaciones entre los predictores y la respuesta o creación masiva de transformaciones para< conseguir linealidad, lo mejor es separar las respuestas y quedarnos con el input depurado, de esta forma podemos aplicar una misma función a todo el conjunto sin peligro de transformar las respuestas y cosas raras que puedan suceder. 
+
+```{r lectura datos}
+# Parto de los datos sin atípicos ni ausentes guardados
+datos<-readRDS("F:/Documentos/Master Comercio 2021-22/PARTE I_Depuracion y Regresiones/Dia1_MD&Depuracion/datosVinoDep")
+
+varObjCont<-datos$varObjCont
+varObjBin<-datos$varObjBin
+input<-datos[,-(1:2)]
+```
+
+No es mala idea generar un par de variables de "control" para la evaluación de los efectos de los predictores frente a la respuesta. La idea es la siguiente: si generamos variables en el más estricto sentido aleatorio (por ejemplo siguiendo una distribución uniforme[0,1]) cualquier relación que estas presenten con la variable respuesta serán debidas puramente al azar, con lo que se pueden considerar relaciones espurias, es decir, falsas. 
+
+Por tanto, ya sea en la inspección preliminar de relaciones con la respuesta mediante correlación (relación lineal, válido para continua-continua) o VCramer (asociación en tablas de contingencia, válido para cruce de variables categóricas/nominales o continuas tramificadas) o bien en los propios modelos de regresión, las variables que presenten una menor relación con la respuesta que las variables de control, tendrán una sombra de sospecha de la veracidad de esa relación y probablemente serán descartadas, al menos en su estado original (siempre se pueden tratar de transformar, tramificar etc)
+
+```{r variables de control}
+# Creo la variable aleatoria
+input$aleatorio<-runif(nrow(input))
+
+input$aleatorio2<-runif(nrow(input))
+```
+
+## Estudio descriptivo de relaciones con la respuesta
+
+En este apartado intentaremos descubrir a priori las relaciones marginales de las variables con la variable objetivo binaria para hacernos una idea de cuales de ellas serán potencialmente influyentes en los modelos de regresión logística que ajustemos. 
+
+```{r Vcramer, warning=FALSE}
+#Obtengo la importancia de las variables. 
+#Falla si hay alguna variable cuantitativa con menos de 6 valores diferentes
+graficoVcramer(input,varObjBin)
+```
+
+En este caso tenemos que las variables tentativas para el modelado son: 
+
+- Clasificación 
+- Calificación del productor (en cualquiera de sus variantes)
+- Acidez
+- prop_missings 
+- Cloruro sódico 
+- Sulfatos
+
+A partir de aquí ya tenemos aleatorio2 y empezamos a sospechar que más allá de esta las relaciones pueden ser por pura casualidad. 
+
+Vamos ahora a utilizar las funciones gráficas para pintar las relaciones de las variables con la objetivo binaria. En primer lugar podemos utilizar la función mosaico que es resultona para las relaciones entre categóricas y las de boxplot e histograma para valorar las relaciones de los predictores continuos con la objetivo binaria.
+
+```{r mosaicos, warning=FALSE}
+#Veo gráficamente el efecto de dos variables cualitativas sobre la binaria
+m1<-mosaico_targetbinaria(input$Region,varObjBin,"Region") #esta no influye
+m2<-mosaico_targetbinaria(input$Clasificacion,varObjBin,"Clasificacion") #esta sí influye
+```
+
+Como ya intuíamos por el gráfico de V de Cramer, la pobre variable región no discrimina nada frente a la compra del vino (nuestra objetivo binaria) ya que las distribuciones de 0 y 1 en las distintas regiones son muy similares digamos 20/80%?? 
+
+En cambio, la variable clasificación tiene mucho que aportar ya que vemos que las distribuciones de 0 y 1 en los distintos niveles de clasificación son muy distintos. Así, empezamos a intuir que los vinos con clasificación desconocida parecen ser vinos malillos en general al menos en el sentido de que no se compran. Parece que existe una relación relativamente creciente de proporción de compra con el aumento de las estrellas de clasificación. En este punto podemos ir pensando ya que las clasificaciones *** y **** tienen diferencias mínimas frente a la respuesta, por lo que son susceptibles de unión si se quiere reducir el número de parámetros del modelo (todo esto mejor valorarlo en conjunción con el estimador del modelo para ambas categorías, me explico, si los estimadores son similares Ok si la diferencia es importante...entonces tal vez merece la pena mantener esa diferenciación)
+
+
+```{r histogramas y boxplots, warning=FALSE, message=F}
+#Veo gráficamente el efecto de dos variables cuantitativas sobre la binaria
+bx1<-boxplot_targetbinaria(input$Densidad,varObjBin,"Densidad")
+bx2<-boxplot_targetbinaria(input$Acidez,varObjBin,"Acidez")
+bx3<-boxplot_targetbinaria(input$CalifProd_cont,varObjBin,"Calificacion Productor")
+bx4<-boxplot_targetbinaria(input$CloruroSodico,varObjBin,"Cloruro Sodico")
+
+
+h1<-hist_targetbinaria(input$Densidad,varObjBin,"Densidad")
+h2<-hist_targetbinaria(input$Acidez,varObjBin,"Acidez")
+h3<-hist_targetbinaria(input$CalifProd_cont,varObjBin,"Calificacion Productor")
+h4<-hist_targetbinaria(input$CloruroSodico,varObjBin,"Cloruro Sodico")
+
+marrangeGrob(list(bx1,bx2,h1,h2),nrow = 2,ncol = 2)
+marrangeGrob(list(bx3,bx4,h3,h4),nrow = 2,ncol = 2)
+```
+
+Por ver que V de cramer no miente, probamos con densidad y el resultado es que el solapamiento de las distribuciones de 0 y 1 es casi completa. En el caso de Acidez, existe una ligera diferencia en distribuciones que quizá se traduzca en un mínimo efecto en el modelo (se verá..)
+
+Las variables calificación del productor continua parece tener influencia en la respuesta binaria en el sentido de que los vinos que se compran (compra=1) tienen una distribución de calificación de productor menos elevada...algo que puede resultar poco intuitivo pero, ya se sabe, el productor y sus calificaciones con posible sesgo...jeje
+
+Cloruro sódico tiene una influencia muy baja. 
+
+## Tranformaciones de variables
+
+Vamos a generar las transformaciones de las variable continuas que maximizan la relación con la variable objetivo binaria en sentido de V de Cramer. 
+
+```{r transformaciones, warning=FALSE}
+#Busco las mejores transformaciones para las variables numéricas con respesto a la variable binaria
+input_bin<-cbind(input,Transf_Auto(Filter(is.numeric, input),varObjBin))
+
+# Guardamos el dataset con las tranformaciones
+todo_bin<-data.frame(input_bin,varObjBin)
+saveRDS(todo_bin,"todo_bin_Vino")
+```
+
+
+**Nota:** La principal precaución que hay que tener si utilizamos el arvhivo tod_bin es no considerar un modelo completo con todas al mismo tiempo puesto que se pueden generar los problemas de colinealidad. Solamente utilizaremos el set completo de variables cuando hagamos un proceso de selección automática de variables, proceso en el cual se elegirán las que más R2 aporten al modelo. 
+
+```{r Vcramer tranformaciones, warning=FALSE}
+#Obtengo la importancia de las variables. 
+graficoVcramer(input_bin,varObjBin)
+```
+
+Aquí podemos fijarnos en los cambios en VCramer al transformar las variables. Destaca el caso de la variable densidad. En su estado natural es la peor de todas, en cambio con la transformación raiz4 pasa directamente al top 10 de efectos!! Esto es justamente lo que se busca con estas transformaciones. 
+
+
+
+
+## Modelos de regresión logística para la predicción de la variable compra
+
+En esta sección se ajustan distintos modelos de regresión logística para predecir la compra de los vinos. En primer lugar, tomamos la partición training (donde ajustamos el modelo) y test (donde probamos su capacidad).
+
+Antes de nada vamos a aclararnos con el archivo a utilizar que será el todo_bin que hemos generado, aunque en esta primera parte (por no hacerlo muy largo y pesado) nos centraremos en variables originales sin transformaciones. Es importante tener claro que queremos filtrar y como hacerlo.
+
+Por otra parte, siempre es conveniente echar un vistazo a la distribución de la variable objetivo, cuantos 0 y 1 hay en el archivo?? Esto es muy relevante a la hora de valorar cuestiones importantes en el contexto de clasificación supervisada. En particular, prestamos atención a la baja representación del evento ya que esto supone un handicap para cualquier algoritmo de clasificación (incluida la regresión logística) y ha dado lugar a toda una rama de investigación sobre *imbalanced classification* que se agudiza en el contexto del Big Data y la paralelización de procesos con los llamados *small disjunts* que seproducen cuando en la paralelización se tienen particiones poco representativas de los datos (y del evento en particular) en los distintos nodos del cluster computacional utilizado. Todo esto para alimentar la curiosidad y dar un contexto sobre la importancia de todo esto. 
+
+Es muy importante saber también como funcionan las métricas de evaluación en el contexto de la clasificación supervisada. Es muy extendido el uso del famoso Accuracy, lo que vendría a ser el complementario a 1 de la tasa de fallos de la matriz de confusión de las predicciones frente a la distribución original. Hablando en plata, cuanto te has equivocado Don modelo sumando 0 y 1?? 
+
+Por supuesto, es una métrica muy válida e informativa pero tiene sus riesgos cuando nos salimos del contexto para el que fueron concebidas (distribución balanceada de clases del evento  aprox. 50% de cada una de las categorías). Imaginemos la siguiente situación, variable objetivo binaria con el 5% de las instancias pertenecientes al evento y el 95% al no evento (mortalidad en accidentes, enfermedades raras, impagos bancarios etc..). Ajustamos modelo, podría ser R. Logística o una potente red neuronal...Resultado, Accuracy del 95% has acertado en el 95% de los casos!! Apago el ordenador y me voy feliz a casa con el informe enviado a la jefa. Probablemente no vuelvo a currar más allí... 
+
+Problema: El algoritmo lo que quiere es minimizar la tasa de fallos (si es que se consigna esa métrica para su ajuste) por lo que lo más fácil con toda probabilidad es decir que todos son *no evento* asegurando un muy buen accuracy aparente. En cuanto indagamos un poco y le preguntamos por la *sensibilidad* del modelo nos respondería 0. Es decir la capacidad de reconocer a los eventos (los 1) es nula ya que no ha identificado ninguno...el accuracy sigue siendo del 95%. 
+
+Toda esta película motiva el siguiente check de la distribución a priori de la variable y la consiguiente decisión de la métrica a utilizar para la evaluación del modelo de clasificación. Como se verá el área bajo la curva ROC o el kappa suelen ser métricas más adecuadas cuando no se presenta balanceo de clases. 
+
+```{r}
+#Cargo los datos depurados (incluidas las variables transformadas)
+#todo<-readRDS("todo_bin")
+todo<-todo_bin
+
+# Vemos el reparto original. 
+# Comprobamos que la variable objetivo tome valor 1 para el evento y 0 para el no evento
+freq(todo$varObjBin) #ese ha de ser el error de referencia
+```
+
+En este caso, tenemos la situación de desbalanceo hacia los 1 ya que la frecuencia a priori de 1 es del 78%. El modelo tendrá mayor dificultad en reconocer a los 0. Visto esto, si tenemos un accuracy de 0.78...podemos sospechar y miraremos bien *sensibilidad* y *especificidad* para tranquilizar nuestras conciencias. 
+
+
+### Partición training-test
+
+Vamos a generar la partición del archivo en el que incluiremos solamente las variables originales. Por ello, pedimos que nos muestre las posiciones de las variables para saber como filtrar las columnas deseadas. 
+
+Tenemos que seleccionar variables originales (1:18) y la respuesta (33). 
+
+```{r}
+# Le pedimos las posiciones de las variables para tener cuidado y saber filtrar
+names(todo)
+
+#Hago la partición
+set.seed(123456)
+trainIndex <- createDataPartition(todo$varObjBin, p=0.8, list=FALSE)
+data_train <- todo[trainIndex,c(1:18,33)]
+data_test <- todo[-trainIndex,c(1:18,33)]
+
+freq(data_train$varObjBin)
+freq(data_test$varObjBin)
+```
+
+### Modelo completo de referencia
+
+Comenzamos con nuestro modelo completo de referencia que incluye todas las variables con la precaución de no considerar ID puesto que no tiene sentido ni variables "dobladas" en este caso hay que elegir entre calificación del productor continua o categórica. A la vista de que en lineal funcionó bien la continua y solamente consume un parámetro en el modelo empezaremos con esta, con lo cual quitamos la nominal.
+
+Aquí hay que tener cierta precaución de no restar las variables en la fórmula si se quiere utilizar posteriormente la función *impVariablesLog* ya que tiene un tremendo artificio que justamente busca un - y se estropea el procedimiento. Esta función lo que hace es realiza un paso de step (selección de variables automática) y ordena las variables en relación a su aportación al pseudo R2 de Mc Fadden. Está programada bastante ad-hoc y es por ello que casca cuando restamos efectos en la propia fórmula. Fuera de caret (paquete que utilizamos para la validación cruzada) no he encontrado esta funcionalidad en R.
+
+Por este motivo quito los efectos no deseados en el data_train_de entrada, columnas 1 y 11.
+
+```{r}
+#pruebo un primer modelo sin las transformadas
+modeloInicial<-glm(varObjBin~.,data=data_train[,-c(1,11)],family=binomial)
+summary(modeloInicial)
+```
+
+Salta a la vista que hay muchos efectos no significativos (no tienen estrellas) y a primera vista mosquean los errores gigantes clasificación *** y ****. Atención porque el parámetro estimado de 18 resulta el mayor de todos... Vale, a que se debe esto?? Con toda probabilidad a la falta de instancias de estas categorías con compra = 0. Recordemos que la incidencia era ya baja y hemos tomado una partición de los datos..lo que empeora la situación. 
+
+Vamos a echar un ojo a la distribución de la tabla cruzada de Clasificación y la objetivo en data_train. 
+
+```{r}
+table(todo$Clasificacion,todo$varObjBin)
+
+table(data_train$Clasificacion,data_train$varObjBin)
+
+```
+
+Vaya...ni una sola instancia con compra=0 y clasificación de *** o ****. Esto genera ese alto error. El gran problema de esto será la interpretabilidad del modelo. Hay que pensar que el OR (cuanto más probable es que se de el evento que el no evento dada una premisa) es la exponencial del parámetro..si este parámetro es 18, estamos ante un OR de 102975330, cosa que resulta difícil de interpretar. Por este motivo y dado que uno de los puntos fuertes de las regresiones es la interpretación, decidimos unir categorías. 
+
+```{r}
+# unir categorías
+todo$Clasificacion<-car::recode(todo$Clasificacion, "c('**','***','****')='**+'")
+
+# Actualizar la partición
+data_train <- todo[trainIndex,c(1:18,33)]
+data_test <- todo[-trainIndex,c(1:18,33)]
+
+# Volver a ajustar el modelo inicial
+modeloInicial<-glm(varObjBin~.,data=data_train[,-c(1,11)],family=binomial)
+summary(modeloInicial)
+```
+
+Nos hemos librado de los peligros de OR gigantes!!
+
+Consultamos los valores de pseudoR2 en los conjuntos de training y test, que se sitúan en torno a 0.41 lo cual indica un muy buen ajuste. Recordemos que puede equivaler a R2 lineales de más de 0.8!!
+
+
+```{r}
+pseudoR2(modeloInicial,data_train,"varObjBin")
+pseudoR2(modeloInicial,data_test,"varObjBin")
+modeloInicial$rank #número de parámetros
+
+impVariablesLog(modeloInicial,"varObjBin") 
+#si los datos de entrenamiento, no se llaman "data_train", hay que indicarlo
+
+```
+
+En el gráfico se ordenan las aportaciones al pseudoR2 de las distintas variables teniendo a clasificación como la gran ganadora ya que aporta muchísimo más que cualquiera. 
+
+Vamos a considerar un modelo con las 3 primeras variables ya que presentan una importancia bastante más elevada que el resto.
+
+```{r}
+#pruebo uno sencillo con 3 variables
+modelo2<-glm(varObjBin~Clasificacion+CalifProd_cont+Etiqueta,
+             data=data_train,family=binomial)
+summary(modelo2)
+pseudoR2(modelo2,data_train,"varObjBin")
+pseudoR2(modelo2,data_test,"varObjBin")
+modelo2$rank
+```
+
+Este modelo es sencillo y bastante significativo en cuanto a sus parámetros (muy estrellado). Por otro lado el pseudoR2 en training baja un poquito pero aumenta en test, lo que puede indicar mayor capacidad de generalización a datos desconocidos. Tiene buena pinta, habrá que probarlo en validación cruzada ya que en el esquema training/test aún estamos expuestos a la aleatoriedad de la selección de la partición.
+
+No es mala idea probar alguna interacción de alguna de estas variables ya que tienen un caracter inherente muy similar de valoración de la calidad en algún sentido. Es lógico pensar que puedan presentar un comportamiento conjunto. Cuando incluimos interacción permitimos la evolución conjunta de las variables en el modelo, ya que de lo contrario siempre tenemos efectos independientes e interpretación ceteris paribus (a todo lo demás constante).
+
+Probaremos entonces la interacción de clasificación y etiqueta.
+
+```{r}
+#pruebo uno con la interacción de alguna continua como pH y etiqueta
+modelo3<-glm(varObjBin~Clasificacion+CalifProd_cont+Etiqueta*Clasificacion,
+             data=data_train,family=binomial)
+summary(modelo3)
+pseudoR2(modelo3,data_train,"varObjBin")#No parece muy buena idea
+pseudoR2(modelo3,data_test,"varObjBin")
+modelo3$rank
+```
+
+Modelo que no tiene mala pinta puesto que varias de las interacciones resultan significativas, algunas bastante con 2 y 3 estrellas. Normalmente no ha de asustar que algunas de ellas no sean significativas y se mantienen sin problema en el modelo. Parece producirse un efecto potenciador de la variable clasificación ya que sus coeficientes de efectos principales aumentan. En este momento el efecto de la categoría clasificación 2+ estrellas ya no solamente se valora con un único coeficiente sino con todos los implicados en la interacción con etiqueta que resulten significativos. De esta forma se hace dependiente la influencia de la clasificación a los valores que tome etiqueta. Ejemplos:
+
+- Vinos con Clasificación 2+ estrellas 
+    * Si etiqueta es B (nivel de referencia de Etiqueta), su coeficiente es 3.69 con lo que la probabilidad de compra de este tipo de vinos es exp(3.69) veces superior a aquellos vinos con clasificación 1 estrella y etiqueta B.
+    * Si etiqueta es M, su coeficiente será 3.69+0.77-2.29, es decir, betaClas2estr + betaEtiM + betaClas2estr:EtiM. Con lo que el efecto será exp(3.69+0.77-2.29)=exp(2.17), menor que el anterior. ASí la probabilidad de compra de un vino con clasificación 2 estrellas y etiqueta mala es exp(2.17) mayor que la de un vino con clasificación 1 estrella y etiqueta B (niveles de referencia de ambas variables)
+    
+Esta es la idea de las interacciones. Como se intuye la interpretación se complica bastante pero se pueden captar patrones de realidades interesantes sin la constricción del ceteris paribus. 
+
+Vamos a probar a eliminar esta interacción y poner en su lugar un par de variables continuas para obtener un modelo más sencillo y evaluar posterioremente si el aument en complejidad de las interacciones merece el esfuerzo.
+
+```{r}
+#fijandome en la importancia de las variables, 
+#selecciono aquellas por encima de las aleatorias
+modelo4<-glm(varObjBin~Clasificacion+CalifProd_cont+Etiqueta+pH+Acidez,
+             data=data_train,family=binomial)
+summary(modelo4)
+
+pseudoR2(modelo4,data_train,"varObjBin")#es un poquito peor que el anterior,
+#pero el n. de parametros es casi la mitad
+pseudoR2(modelo4,data_test,"varObjBin")
+modelo4$rank
+
+```
+
+El modelo tiene la mitad de parámetros que el anterior y su capacidad en el esquema training/test es muy parecida. De hecho se observa un ligero aumento en pseudoR2 de test.
+
+Vamos a introducir otro par de variables continuas de las que pueden influir para valorar el aporte a la capacidad predictiva del modelo y la significación estadística de estos posibles efectos.
+
+```{r}
+modelo5<-glm(varObjBin~Clasificacion+CalifProd_cont+Etiqueta+pH+
+               Acidez+CloruroSodico+Sulfatos,data=data_train,
+             family=binomial)
+summary(modelo5)
+pseudoR2(modelo5,data_train,"varObjBin")
+pseudoR2(modelo5,data_test,"varObjBin")
+modelo5$rank
+```
+
+A la luz del summary del modelo, ambas variables presentan algo de significación estadística en el contraste de los parámetros (lo que viene a decir que estos parámetros son distintos de 0 a un nivel de confianza del 5% con 1 estrella o al 10% con un punto). Sin embargo, no queda muy claro que aporten mucha capacidad predictiva al modelo puesto que los pseudoR2 son muy similares a los arrojados por el modelo anterior, incluso disminuye en el conjunto de test. 
+
+Por último vamos a probar a introducir la interacción en el último modelo. Modelo más complejo para comparar por CV.
+
+```{r}
+#Pruebo alguna interaccion sobre el 2
+modelo6<-glm(varObjBin~Clasificacion+CalifProd_cont+Etiqueta+
+               pH+Acidez+CloruroSodico+Sulfatos+Clasificacion:Etiqueta,
+             data=data_train,family=binomial)
+summary(modelo6)
+pseudoR2(modelo6,data_train,"varObjBin")#No parece muy buena idea
+pseudoR2(modelo6,data_test,"varObjBin")
+modelo6$rank
+```
+
+Aumenta la capacidad en training pero disminuye en test...síntoma de sobreajuste.
+
+De esta forma podríamos seguir jugando con los efectos y añadir interacciones u otras variables no consideradas en busca de patrones conjuntos interesantes. 
+
+## Evaluación de los modelos por validación cruzada repetida
+
+Pasamos a la evaluación de la capacidad de los modelos el formato comparativo y bajo el paradigma de validación cruzada repetida. ASí, partiremos el data todo en 5 partes y formaremos 5 training con las 5 combinaciones de 4/5 con sus correspondientes 5 test de 1/5, repitiendo esto 20 veces con distintas semillas de inicialización de las particiones. De esta forma, el modelo (misma fórmula) se enfrentará a distintos tr/tst considerando en su entrenamiento todos los datos finalmente pero nunca todos a la vez, evitando sobreajuste y la sombra de la aleatoriedad. Tendremos 100 ajustes por fórmula y promediaremos los resultados obtenidos para valorar la relación sesgo-varianza.
+
+Hay un pequeño truquillo en este punto para que caret y su función train (maravilla del ML en R) reconozca la variable objetivo como le gusta, esto es, con nombres de factor y no 0 y 1 (los genios tienen sus cositas..) Para ello existe la opción make.names() que realiza este paso y nombre como X0 y X1. Antes de esto, haremos una copia de nuestra variable 0,1 porque nos gustará mantenerla así para otras cuestiones. 
+
+Una vez hecho esto, generamos una lista de fórmulas de los modelos creados y aplicamos un bucle para que se aplique la función train a cada fórmula con el esquema comentado. Como comentábamos en algún punto, dado el desbalanceo de clases en la objetivo, utilizaremos la métrica ROC para evaluar la bondad de ajuste y no el accuracy. 
+
+Tras este proceso obtenemos un boxplot con el sesgo-varianza de las métricas de ajuste a lo largo de los 100 modelos por fórmula. 
+
+```{r}
+#Validacion cruzada repetida para elegir entre todos
+
+#copia de la variable original
+auxVarObj<-todo$varObjBin
+
+#formateo la variable objetivo para que funcione el codigo
+todo$varObjBin<-make.names(todo$varObjBin) 
+
+total<-c()
+modelos<-sapply(list(modeloInicial,modelo2,modelo3,modelo4,modelo5,modelo6),formula)
+for (i in 1:length(modelos)){
+  set.seed(1712)
+  vcr<-train(as.formula(modelos[[i]]), data = todo,
+             method = "glm", family="binomial",metric = "ROC",
+             trControl = trainControl(method="repeatedcv", number=5, repeats=20,
+                                      summaryFunction=twoClassSummary,
+                                      classProbs=TRUE,returnResamp="all")
+  )
+  total<-rbind(total,data.frame(roc=vcr$resample[,1],modelo=rep(paste("Modelo",i),
+                                                                  nrow(vcr$resample))))
+}
+boxplot(roc~modelo,data=total,main="Área bajo la curva ROC") 
+```
+
+El boxplot muestra el sesgo-varianza de las estimaciones por validación cruzada para todos nuestros modelos, comenzando por el modelo completo, modelo con las 3 nominales, modelo con la interacción, luego con las dos primeras continuas, luego la adición de otras dos continuas y finalmente el modelo con las 4 continuas y la interacción. 
+
+En general todos son modelos buenos puesto que tienen un valor de ROC en torno a 0.9, lo que indica una capacidad de clasificación muy buena. Las diferencias entre ellos son muy sutiles (por la escala del gráfico parecen mayores..)
+
+Veamos los valores medios y la desviación respecto a la media de todos los modelos para valorar numéricamente estas diferencias.
+
+```{r}
+aggregate(roc~modelo, data = total, mean) 
+aggregate(roc~modelo, data = total, sd) 
+```
+
+
+```{r}
+#recupero la variable objetivo en su formato
+todo$varObjBin<-auxVarObj
+
+#miro el numero de parametros
+modeloInicial$rank
+modelo2$rank 
+modelo3$rank
+modelo4$rank
+modelo5$rank 
+modelo6$rank
+```
+
+
+Todos son buenos modelos puesto que tienen un ROC de 0.9. Entre ellos las diferencias son muy muy ligeras por lo que la decisión final dependerá de la complejidad de los mismos. Siempre será tentador optar por los mejores (en milésimas) como los modelos 3 o 6 que tienen las interacciones de Clasificación y etiqueta (esto se debe a la escala del boxplot porque si el eje empezara en 0 ni notaríamos la diferencia probablemente). 
+
+No me parece mala idea ir a modelo más complejo pero, una vez valorado (ajustado en modelo completo y evaluados los OR) la interacción pierde significación estadística y los OR por tanto, también. Es por ello que me decido por el modelo 4 que es el que resulta más sencillo y con capacidad predictiva muy similar a los demás (el 2 es un poco peor aunque más sencillo). 
+
+Todo esto no lo creáis, podéis probar a lanzar los siguientes códigos con otro modelo...
+
+
+## Punto de corte óptimo para la probabilidad estimada
+
+Vamos a ver las distribuciones de las probabilidades estimadas para los conjuntos de evento y no evento observado. Lo que nos gustaría es tener una separabilidad total, es decir 0 solapamiento e, idealmente, que las probabilidades estimadas para los 0 fueran muy bajas (se concentraran en valores pequeños) y las de los 1 contrariamente en valores altos cercanos a 1.
+
+
+```{r}
+## BUscamos el mejor punto de corte
+
+#gráfico de las probabilidades obtenidas
+hist_targetbinaria(predict(modelo4, newdata=data_test,type="response"),data_test$varObjBin,"probabilidad")
+```
+
+En azul la distribución de probabilidades estimadas para los 1. Muy buena pinta, su densidad se "apunta" en valores altos. Sin embargo la de los 0 está mucho más repartida..Recordemos que dado el desbalanceo ya intuíamos que el modelo tendría mayor dificultad en reconocer a los 0. 
+
+En cualquier caso parece que se puede conseguir una separabilidad alta entre clases con algún punto de corte de la probabilidad, esto es, diciendo todas las probabilidades estimadas mayores que punto de corte los clasifico como 1 y el resto como 0. 
+
+El valor de corte por defecto en cualquier algoritmo de clasificación es el 0.5 pero esto no necesariamente es lo más adecuado en contexto de desbalanceo. Por esta razón es bueno hacer el ejercicio de buscar el punto de corte que resulte óptimo bajo algún criterio. 
+
+En primer lugar vamos a ir a "ojímetro" dado el gráfico anterior. Probaremos el estándar 0.5 y otro punto de corte que parece que discrimina bien, en este caso parece que en el entorno de 0.75 es donde comienza a aumentar mucho la probabilidad de 1 y disminuye la de 0. Probaremos por ahí...(siempre hay que tener en cuenta la pre valencia a priori del evento, es decir, su frecuencia relativa de aparición en el archivo que era 0.78)
+
+```{r}
+#probamos dos
+sensEspCorte(modelo4,data_test,"varObjBin",0.5,"1")
+sensEspCorte(modelo4,data_test,"varObjBin",0.75,"1")
+```
+
+Vale, aquí los resultados. Con el punto de corte en 0.5 el accuracy es 0.85 (85% de individuos correctamente clasificados) ahora bien, la especificidad (capacidad para clasificar a los 0) está en un 61.9% con lo que se está comentiendo casi un 40% de falsos positivos, individuos que el modelo clasifica como 1 pero en verdad son 0... Este valor es muy bajo..pobres 0...
+
+Con el punto de corte en 0.75, el accuracy disminuye un poco (algo natural puesto que no se puede maximizar todo a la vez) pero la especificidad aumenta a 0.85, solamente un 15% de falsos positivos. Se sacrifica sin embargo la sensibilidad (capacidad de clasificar a los 1) pasando de 0.91 a 0.82. 
+
+Este es el clásico trade-off entre sensibilidad y especificidad y la decisión depende mucho del contexto. Hay aplicaciones donde el coste de cometer un falso positivo es muchísimo mayor (porque se le aplica un tratamiento o prueba gold standard carísima) por lo que se tiende a minimizar este riesgo. En otras ocasiones queremos reconocer a todos los 1 seguro puesto que puede ser cuestión de vida o muerte y no nos importa tanto si se cuelan algunos 0..
+
+Existe el índice de youden que maximiza la relación entre sensibilidad y especificidad conjuntamente con una simple fórmula aditiva, sens+espec-1. 
+
+Podemos generar una rejilla de puntos de corte posibles entre 0 y 1 y valorar cual de los maximiza este criterio y compararlo con el que maximiza el accuracy. 
+
+```{r}
+## generamos una rejilla de puntos de corte
+posiblesCortes<-seq(0,1,0.01)
+rejilla<-data.frame(t(rbind(posiblesCortes,sapply(posiblesCortes,function(x) sensEspCorte(modelo4,data_test,"varObjBin",x,"1")))))
+rejilla$Youden<-rejilla$Sensitivity+rejilla$Specificity-1
+plot(rejilla$posiblesCortes,rejilla$Youden)
+plot(rejilla$posiblesCortes,rejilla$Accuracy)
+rejilla$posiblesCortes[which.max(rejilla$Youden)]
+rejilla$posiblesCortes[which.max(rejilla$Accuracy)]
+```
+
+Nuestro ojímetro inicial no iba desencaminado y Youden dice que el punto de corte óptimo es 0.76. Por otro lado y como es de esperar pues por definición ha de ser así, el punto de corte que maximiza el accuracy es 0.49 (en el entrono de 0.5). Probamos las métricas con estos valores.
+
+```{r}
+#Los comparamos
+sensEspCorte(modelo4,data_test,"varObjBin",0.49,"1")
+sensEspCorte(modelo4,data_test,"varObjBin",0.76,"1")
+```
+
+Veamos ahora los coeficientes del modelo ganador.
+
+```{r}
+# Vemos los coeficientes del modelo ganador
+coef(modelo4)
+```
+Influencia positiva de las clasificaciones buenas y las etiquetas y clasificación del productor malas/bajas. Influencia negativa de las dos continuas. 
+
+
+Podemos evaluar la estabilidad del modelo elegido en trainin/test con su correspondiente área bajo la curva roc.
+
+```{r}
+#Evaluamos la estabilidad del modelo a partir de las diferencias en train y test:
+pseudoR2(modelo4,data_train,"varObjBin")
+pseudoR2(modelo4,data_test,"varObjBin")
+roc(data_train$varObjBin, predict(modelo4,data_train,type = "response"), direction="<")
+roc(data_test$varObjBin, predict(modelo4,data_test,type = "response"), direction="<")
+sensEspCorte(modelo4,data_train,"varObjBin",0.76,"1")
+sensEspCorte(modelo4,data_test,"varObjBin",0.76,"1")
+```
+
+
+Podemos ver la matriz de confusión en el conjunto de test. Para ello generaremos el factor de predicciones cortando las probabilidades estimadas por el punto de corte seleccionado y asignando 0 y 1, luego enfrentaremos a la verdad verdadera y evaluaremos su capacidad.
+
+```{r}
+# Generar el factos con las clases estimadas en test
+pred_test<-factor(ifelse(predict(modelo4,data_test,type = "response")>0.76,1,0))
+
+# Tablas marginales
+table(pred_test)
+table(pred_test,data_test$varObjBin)
+
+# Matriz de confusión
+confusionMatrix(pred_test,data_test$varObjBin, positive = '1')
+```
+
+El modelo reconoce a 818 de 999 positivos (1) y a 238 de 273 (0). 
+
+
+## Interpretación de parámetros del modelo logístico
+
+Para interpretar el modelo es bueno hacer sobre los datos completos puesto que los estimadores resultarán más robustos al basarse en mayor cantidad de observaciones.
+
+```{r}
+# Ajustamos el modelo a datos completos para obtener estimadores más fiables
+modeloC<-glm(formula(modelo4),
+              data=todo,family=binomial)
+summary(modeloC)
+```
+
+El summary del modelo nos da los betas, esto es la expresión lineal respecto al logit del modelo. Recordamos que el logit es el log(p(evento)/p(no evento)) = beta0 + beta1 x1 + ... betan xn
+
+Entonces no se interpretan los betas como tal sino los Odds Ratio (OR) que son la exponencial de los parámetros beta. 
+
+Para calcular los OR podríamos aplicar las exponenciales de forma manual o recurrir a la función logistic.display del paquete epiDisplay que los calcula por nosotros junto con sus intervalos de confianza al 95%, además calcula los OR ajustados por los grados de libertad del modelo, que son los que suelen interpretarse ya que corrigen el valor "crudo" del OR teniendo en cuenta la presencia de los demás parámetros del modelo. Así mismo nos da un p-valor que informa de la significación de dichos OR (aunque esto debería coincidir con la significación misma de los betas)
+
+
+
+```{r}
+# Odds ratios
+epiDisplay::logistic.display(modeloC)
+```
+
+Conclusiones del modelo,
+
+- La probabilidad de compra respecto a no compra de un vino con **Clasificación 2 o más estrellas** es 20.54 veces superior a aquellos vinos con clasificación 1 estrella, pudiendo variar este ratio de probabilidades entre 14.82 y 28.46
+
+- La probabilidad compra respecto a no compra de un vino con **Clasificación desconocida** es 0.16 veces la correspondiente a aquellos vinos con clasificación 1 estrella. Dicho de otro modo la probabilidad de compra frente a no compra se reduce en un 84% en los vinos con clasificación desconocida con respecto a los vinos con clasificación 1 estrella.
+
+- Un aumento unitario en la **Calificación del productor** produce una disminución del ratio de probabilidades de compra/no compra del 35% pudiendo variar entre 31% y 39% con el 95% de confianza.
+
+- La probabilidad de compra de un vino con **Etiqueta MM** es 4.06 veces superior a la correspondiente a un vino con etiqueta B. 
+
+- Cada aumento unitario del **pH** produce una reducción de la probabilidad de compra del 24% (IC 14-33%)
+
+- Cada aumento unitario de la **Acidez** del vino se traduce en una reducción de la probabilidad de compra del 15% (IC 5-24%)
+
+Todos estos efectos se entiende en el contexto ceteris paribus, es decir, todo lo demás constante. Con lo cual, este aumento de la acidez produce tal disminución en la probabilidad de compra para vinos con misma etiqueta, clasificación , calificación del productor y nivel de pH. 
+
+

@@ -1,0 +1,238 @@
+---
+title: "Introducción al manejo de datos con R"
+author: "Guillermo Villarino"
+date: "2/11/2021"
+output: rmdformats::readthedown
+  # html_document:
+  #   toc: true # table of content true
+  #   toc_depth: 3  # upto three depths of headings (specified by #, ## and ###)
+  #   number_sections: true  ## if you want number sections at each table header
+  #   theme: united  # many options for theme, this one is my favorite.
+  #   highlight: tango  # specifies the syntax highlighting style
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(kableExtra)
+library(dplyr)
+library(data.table)
+library(DT)
+library(rmdformats)
+library(dtplyr)
+library(microbenchmark)
+library(janitor)
+library(plotly)
+```
+
+## Comentarios iniciales y objetivos
+
+En este documento se pretende hacer un repaso rápido de algunas de las posibilidades disponibles para el manejo de conjuntos de datos en R, con el objetivo fundamental de saber cómo gestionar la información contenida en los datos para extraer solamente la parte que resulte de interés en cada aplicación. 
+
+
+## Análisis inicial de un conjunto de datos
+
+Como *data scientists modelizadores* nos llegarán datos de muy diferente índole, posiblemente en distintos formatos y algunas veces muy "sucios". Nuestro trabajo es resumir que demonios hay en el conjunto de datos y qué información interesante podríamos utilizar para los objetivos concretos del proyecto de modelización. 
+
+En primer lugar, necesitamos tener una idea de tamaño y disposición del archivo. Cuantas variables y registros tenemos, sus tipos, si todo parece correcto en cuanto a codificación o se ven cosas raras, esto a un nivel general. En particular, cada data set es un mundo y nos suscitará distintas cuestiones que debemos saber (auto)resolver para no quedarnos con dudas y tener el mayor conocimiento sobre los datos antes de modelar " a lo loco". 
+
+En este ejemplo, nos llega un dataset en formato RDS (formato comprimido de R para guardar objetos de todo tipo). En primer lugar, saber como leerlo! La función adecuada en este caso es **readRDS('ruta al archivo/archivoRDS.RDS')**. Como nos han dicho que el proyecto trata de consumo de medios, llamaremos al archivo datosMedia. 
+
+### Visualización de los datos en bruto
+
+```{r lectura y visualizacion datos bruto}
+# Leemos los datos desde formato binario comprimido RDS (la mejor opción en tiempo y espacio para guardar cualquier tipo de objeto de R!)
+datosMedia <- readRDS('F:/Documentos/Master Comercio 2021-22/Datos/datos_usoMedia.RDS')
+
+# Salida típica de data.frame. Pinta todo hasta un cierto límite de filas suele ser peor para visualizar...por eso le pido que nos enseñe solamente head()
+head(data.frame(datosMedia)) 
+
+# Salida típica de un tibble de dplyr (siempre corta la salid por filas y columnas y es cómodo para visualizar)
+tibble(datosMedia)
+
+# Salida típica de un data.table (enseña principio y final del archivo, lo cual es útil!)
+data.table(datosMedia)
+
+
+# Salida en formato tabla dinámica para nuestro documento html. Súper útil para visualización de tablas! 
+datatable(head(datosMedia,1000), options = list(autoWidth = TRUE, scrollX = TRUE),
+              caption = 'Datos Uso de Medios',
+              class = 'cell-border stripe nowrap')
+```
+
+Tenemos ante nuestros ojos los datos de utilización de distintos medios de TV, Radio, Apps y Webs de cierto panel de individuos. Interesante, queremos saber cosas pero ya!
+
+## Conclusiones del primer vistazo 
+
+De momento deducimos: 
+
+- El **tamaño** del archivo es de 704806 filas o registros y 13 columnas o variables. Archivo no excesivamente grande pero ya de tamaño considerable para según que cosas. 
+
+- Las filas parecen identificar movimientos de usuarios de distintos medios y en diferentes momentos del tiempo, parece un conjunto dinámico...pero luego parece que tenemos información sobre los propios individuos o panelistas y eso es información estática. Con lo cual estamos ante un conjunto de carácter híbrido ya que contiene parte de evolución y parte de caracterización. 
+
+- Para el análisis dinámico es relevante plantear cuestiones como la **granularidad** de los datos, que sería la unidad mínima de cambio de tiempo. Si prestamos atención a las columnas del archivo, descubrimos que tenemos la fecha (date) cuya unidad mínima de media es el día, entonces, ¿son datos diarios?. La respuesta es no! La fecha se mide en días pero no podemos asegurar que sean datos diarios ya que tenemos otras variables como dayParting (franja horaria) y hora!! (también tenemos semana y día de la semana pero con granularidad mayor o igual que la propia fecha así que nada...) Conclusión, podemos afirmar que tenemos datos de granularidad horaria! Bien! 
+
+- Otro aspecto importante a tener en cuenta es el **periodo de tiempo ** de los datos disponibles. En la salida de data.table podemos ver que la fecha de las últimas filas es 2021-09-30, si asumimos que los datos están ordenados por fecha, tenemos un mes de datos. Pero esto es arriesgado afirmarlo...no lo sabemos. Podemos pedir un **summary()** para ver el rango de variación de la variable fecha (y de todas las variables si queremos). Tenemos la opción del slice_max
+
+```{r analisis fecha}
+# Podemos pedir un cortecito por el valor más alto de fecha ()
+datosMedia %>% slice_max(date)
+
+# O también podemos pedir el corte mínimo
+#datosMedia %>% slice_min(date)
+
+# Summary para ver un poco la distribución de las variables
+summary(datosMedia$date)
+```
+ Finalmente, habíamos supuesto bien y el dataset está ordenado por fecha, desde el 1 hasta el 30 de septiembre. Otra conclusiones son: 1) que hay en torno a 24 mil registros en los días 1 y 30. 2) que la distribución de la fecha es bastante uniforme, media y mediana en torno a mitad de mes, el tercer cuartil el día 23...pues parece que tenemos similar cantidad de registros por día. 
+
+## Distintas posibilidades de programación en R
+
+ Nos planteamos ahora cuántos registros por hora tenemos. Para ello tenemos que contar, y esto es un paso muy importante a la hora de resumir y entender datos. En el formato de las clásicas *queries* de sql para consulta de bases de datos, tenemos un sinfín de posibilidades con R base, dplyr o data.table. La sintaxis, finalmente, es a gusto del consumidor pero hay ciertas generalidades que podemos tener en cuenta a la hora de elegir nuestra aproximación: 
+ 
+ - **R base**: es el tipo de programación primigenio de R, generalmente no se producen cambios que nos obliguen a modificar nuestro código como sucede con algunos paquetes. La sintaxis suele ser un poco menos legible y, en ocasiones puede resultar confusa por la estructura "anidada" de las consultas.
+ 
+ - **dplyr**: muy buena opción para códigos estructurados y legibles a simple vista. en cuanto a tiempos, se comporta generalmente bien aunque las consultas u operaciones complejas con un volumen relativamente alto de datos pueden tardar bastante...mi preferido en cuanto a sintaxis.
+ 
+ - **data.table**: opción favorita para amantes de la velocidad de proceso! Famoso por su rapidez en el manejo de grandes volúmenes de datos. La sintaxis es más parecida a a R base con estructura tipo *datos[filas,columnas]* pero en data.table se añade un tercer argumento generalmente reservado para agrupaciones con by=, esto da mucha flexibilidad para la programación. 
+ 
+Cualquier aproximación de código que encontremos por ahí es válida mientras cumpla el objetivo que nos marcamos. Generalmente mi opción es usar lo que me resulta más fácil en cada momento pero con cierta componente tendente a la optimización de tiempos... Así, algo que me resulta muy útil en el día a día (como asiduo usuario de dplyr) es la utilización del maravilloso paquete **dtplyr** que es capaz de traducir código en dplyr a código en data.table mediante la función *show_query()*. Muy recomendable cuando dplyr se queda lento. 
+
+
+```{r dtplyr para pasar a data.table}
+
+# Utilizo dtplyr para traducir el slice_min que tanto tardaba. 
+lazy_dt(datosMedia) %>% slice_min(date) %>% show_query()
+
+# Aprovecho la query que me devuelve
+data.table(datosMedia)[, .SD[order(date)][frankv(date, ties.method = "min", 
+    na.last = "keep") <= 1L]]
+
+# Podemos comparar los tiempos con un microbenchmark
+
+# prueba <- microbenchmark::microbenchmark(
+# 
+#   dplyr = datosMedia %>% slice_min(date),
+#   data.table = data.table(datosMedia)[, .SD[order(date)][frankv(date, ties.method = "min",
+#     na.last = "keep") <= 1L]],
+#   times = 3
+# )
+# autoplot(prueba)
+```
+ 
+ La diferencia es abismal... no es normal el comportamiento tan lento de slice_min. Para estas cosas nos viene genial la librería dtplyr, muy recomendable! 
+ 
+**Nota**: Recordad comentar (marcar y crtl+Mayus+c) la parte del benchmark a la hora de ejecutar el RMD porque tarda un rato!! 
+
+
+## Contar, contar y contar
+
+Como habíamos mencionado, saber contar bien lo que necesitamos es fundamental y nos ahorrará más de un apuro. Vamos a ir haciendo posible preguntas sobre el comportamiento de la gente e intentaremos darles respuesta con consultas sobre el dataset. 
+
+1) ¿Hay duplicados? Cuantos registros distintos tenemos. 
+ 
+ En este caso los duplicados serían mismo panelista, en el mismo medio, a la misma hora del mismo día puede aparecer varias veces. Vamos a comprobar. 
+ 
+```{r distintos}
+# Datos distintos
+datosMedia %>% distinct()
+```
+
+Tenemos 301360 registros únicos panelista-medio-día-hora, con lo que el resto (mas de la mitad) son duplicados. La pregunta siguiente es, esto es normal o tiene sentido? Y en principio no parece descabellado que alguien pueda entrar en facebook más de una vez por hora, no? 
+
+Esto nos da pie a generarnos un nuevo conjunto de datos que bien podría valer para predicción. Vamos a desarrollar la idea. 
+
+2) ¿Cuantas visitas por hora hace cada panelista a cada medio? 
+
+Crearemos la variable visitasHora para recoger esta información. El dataset resultante tendrá 301360 filas y 14 columnas con lo que resumimos la información de los duplicados en una nueva variable, aligerando mucho el archivo y sin perder información. Ordenamos por valores descendentes de la nueva variable para hacernos una idea del máximo de visitas por hora de la gente. 
+
+```{r datset reducido}
+# Generamos dataset sin duplicados con variable que recoja el número de repeticiones
+datosMedia %>% group_by_all() %>% summarise(visitasHora=n()) %>% arrange(desc(visitasHora)) %>% ungroup()->datosMedia_distinct
+
+datosMedia_distinct
+```
+
+Pues un récord de 564 visitas a la web de facebook el típico domingo por la tarde... Esta estructura de datos nos permitiría modelizar el número de visitas a la hora en función de perfil sexo-edad, variables temporales y medios plataforma y grupos. 
+
+3) Que perfil tienen los grandes consumidores de medios?
+
+Pediremos que nos muestre el summary de
+
+```{r alta repeticion}
+# Perfil mediante tabla cruzada de panelistas con más de 100 visitas a la hora (independiente del medio que visiten)
+datosMedia_distinct %>% filter(visitasHora > 100) %>% 
+            select(IdPanelist,Sex,AgeGroup) %>% distinct() %>%
+                        tabyl(Sex,AgeGroup) %>% adorn_totals(c("row", "col")) %>%
+                                                adorn_percentages("col") %>% 
+                                                adorn_pct_formatting(rounding = "half up", digits = 0) %>%
+                                                adorn_ns() %>%
+                                                adorn_title("combined") %>%
+                                                knitr::kable()
+
+# Consultamos el número de panelistas de la muestra
+n_distinct(datosMedia_distinct$IdPanelist)
+
+# Perfil mediante tabla cruzada de panelistas en la base general
+datosMedia_distinct  %>%  select(IdPanelist,Sex,AgeGroup) %>% distinct() %>%
+                        tabyl(Sex,AgeGroup) %>% adorn_totals(c("row", "col")) %>%
+                                                adorn_percentages("col") %>% 
+                                                adorn_pct_formatting(rounding = "half up", digits = 0) %>%
+                                                adorn_ns() %>%
+                                                adorn_title("combined") %>%
+                                                knitr::kable()
+```
+
+En la base general tenemos un 65% de mujeres y un 35% de hombres mientras que en el subconjunto de usuarios con más de 100 visitas a un medio concreto a la misma hora de un mismo día, tenemos una mayor balanceo 54-46, respectivamente. Esto nos indica que, en términos relativos, hay mayor porcentaje de hombres entre los que más visitas a la hora hacen. 
+
+4) ¿Cuáles son los medios con más *engagement* a nivel horario?
+
+Contamos la frecuencia de aparición de los distintos medios en la muestra de altas repetición. 
+
+```{r engagement hora}
+datosMedia_distinct %>% filter(visitasHora > 100) %>% group_by(Medio) %>% count()
+```
+
+Webs de Facebook e Instagram como clara ganadoras. 
+
+5) ¿Cuales son los medios con mayor número de visitas los sábados en prime time?
+
+```{r engagement sabado prime}
+datosMedia_distinct %>% filter(DiaSem == 'sábado', DayParting =='Primetime') %>% 
+  group_by(Medio) %>% summarise(vSabadoPrime=sum(visitasHora)) %>% arrange(desc(vSabadoPrime))
+```
+
+6) ¿Y considerando solo los medios de TV?
+
+```{r engagement sabdo prime tv}
+datosMedia_distinct %>% filter(DiaSem == 'sábado', DayParting =='Primetime', Plat=='TV') %>% 
+  group_by(Medio) %>% summarise(vSabadoPrime=sum(visitasHora)) %>% arrange(desc(vSabadoPrime))
+```
+
+Con estas cosas de código y estructura mental podemos preguntarnos y, lo más importante, sabemos respondernos casi cualquier cuestión sobre la información contenida en el dataset. Resulta muy importante tener el conocimiento de los datos a nivel descriptivo para poder llegar a buenos modelos predictivos. 
+
+
+## Mini estudio de la variable creada como potencial respuesta a predecir
+
+```{r pintar variable continua}
+
+datosMedia_distinct %>% plot_ly(x= ~visitasHora) %>% add_histogram()
+datosMedia_distinct %>% plot_ly(x= ~visitasHora) %>% add_boxplot()
+
+```
+
+Distribución muy asimétrica. Ya veremos como tratar estas cosas. De momento, podemos pintar lo que esté por debajo de cierto umbral para poder ver algo de la distribución general. 
+
+```{r pintar variable continua sin otliers}
+
+datosMedia_distinct %>% filter(visitasHora <50) %>% plot_ly(x= ~visitasHora) %>% add_histogram()
+datosMedia_distinct %>% filter(visitasHora <50) %>% plot_ly(x= ~visitasHora) %>% add_boxplot()
+
+```
+
+Está claro que el grueso de la distribución se concentra en valore menores que 5. Esto podría cambiar la perspectiva del modelado hacia una aproximación por clasificación o regresión ordinal... 
+
+
+## Continuará...
+
+La idea es que vayamos completando este documento (cada uno lo customiza a su gusto) y nos queda como una chuleta de códigos potencialmente interesantes para la exploración de los datos. 
+

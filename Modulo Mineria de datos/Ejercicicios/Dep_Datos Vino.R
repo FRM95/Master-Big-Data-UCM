@@ -1,0 +1,416 @@
+#' ---
+#' title: "Estudio Datos Vino. Depuración de variables"
+#' author: "Guillermo Villarino"
+#' date: "Otoño 2021"
+#' output: rmdformats::readthedown
+#' ---
+#' 
+## ----setup, include=FALSE---------------------------------------------------------------------------------------------
+knitr::opts_chunk$set(echo = TRUE)
+
+#' 
+#' ## Estudio descriptivo de datos sobre venta de vinos
+#' 
+#' 
+## ----cars, warning=FALSE, results='hide', message=FALSE---------------------------------------------------------------
+# Para tener controlado el directorio de trabajo podemos solicitar información 
+getwd()
+
+# Y también fijarlo en nuestra carpeta de datos y funciones
+setwd('F:/Documentos/Master Comercio 2021-22/Online_Material Minería de Datos_Otoño2021')
+
+# Con source podemos cargar el conjunto de funciones 
+source("Funciones_R.R")
+
+# Leer los datos desde csv
+datos <- read.csv("Datos/DatosVino.csv")
+
+# Alternativamente podemos utilizar la función paquetes para instalar/cargar las librerías
+paquetes(c('questionr','psych','car','corrplot','ggplot2',"gridExtra",'kableExtra','dplyr','DMwR2'))
+
+#' 
+#' Este código está preparado para funcionar sobre los DatosVino. Se presenta en la siguiente tabla, la información sobre las variables contenidas en el archivo.
+#' 
+#' ![Fig1. Descripción de los datos](F:/Documentos/Master Comercio 2021-22/Online_Material Minería de Datos_Otoño2021/Dia1_MD&Depuracion/datosVino.png)
+#' 
+#' ### Que comprobar?
+#' 
+#' 1- Tipos de variables
+#' 
+#' 2- Valores mal codificados
+#' 
+#' 3- Valores fuera de rango
+#' 
+#' 4- Variables nominales o Factores con categorías minoritarias
+#' 
+#' - Outliers (incidencia y conversión a missing)
+#' - Missings (incidencia e imputación)
+#' 
+## ---------------------------------------------------------------------------------------------------------------------
+# Inspección del archivo
+str(datos) 
+
+#No todas las categóricas están como factores
+
+#' 
+#' 
+## ---------------------------------------------------------------------------------------------------------------------
+# Para ver rápidamente la posición de las variables en el dataset
+names(datos)
+
+#' 
+#' Se observa que no todas las variables tienen asignado el tipo correcto de datos. Identificamos factores como Compra (columna 3), Etiqueta (columna 12), Clasificación (columna 14) y Región (columna 15). 
+#' 
+#' En este punto interesante charla sobre la posible dualidad continuo-categórica de la variable CalifProductor. Por una parte, tiene 13 valores, por lo que supera el umbral comentado de 10 valores distintos para ser considerada como tal. Por otra, con bajo número de valores, la linealidad con la respuesta se hace compleja, con lo que habría que comprobar la existencia de la misma. Considerando la variable como categórica, tenemos la ventaja de poder captar relaciones no lineales puesto que se modela la pertenencia a cada una de las categorías en relación a una de referencia. Sin embargo, hemos de ser conscientes del número de parámetros que consumirá en nuestro modelo $k-1$ siendo K el número de niveles del factor. 
+#' 
+## ---------------------------------------------------------------------------------------------------------------------
+#Calificación como continua
+hist_cont(datos$CalifProductor, nombreEje =  'Calificacion productor')
+#boxplot_cont(datos$CalifProductor, nombreEje =  'Calificacion productor')
+
+#' 
+#' Por tanto podemos adoptar la estrategia de mantener la variable continua por ese aspecto chi-cuadrado que no nos ha disgustado y, a su vez crear una variable categórica y posteriormente evaluar su distribución uniendo aquellas categorías minoritarias siempre con algún sentido, en este caso ordinal. Así tendremos las dos posibilidades para probar en los modelos de predicción que generemos.
+#' 
+#' 
+## ---------------------------------------------------------------------------------------------------------------------
+#Calificación como continua
+datos$CalifProd_cont <- as.numeric(datos$CalifProductor)
+
+# Indico los factores (sabiendo la posición)
+## En este punto hemos tenido una interesante conversación sobre la 
+datos[,c(3,12:15)] <- lapply(datos[,c(3,12:15)], factor)
+str(datos)
+
+# Se puede hacer con nombres de las variables
+# datos[,c('Compra','Etiqueta','CalifProductor','Clasificacion','Region')] <- lapply(
+#  datos[,c('Compra','Etiqueta','CalifProductor','Clasificacion','Region')], factor)
+#str(datos)
+
+#' 
+#' En este punto, comentar que podemos indicar también el nombre de las columnas en lugar de su posición como aparece comentado. A gusto del consumidor. 
+#' 
+#' Vamos a contar el número de valores únicos de las variables numéricas por si nos hemos dejado algo por ahí. 
+#' 
+## ---------------------------------------------------------------------------------------------------------------------
+# Cuento el número de valores diferentes para las numúricas
+sapply(Filter(is.numeric, datos),function(x) length(unique(x))) 
+
+# Distribuciones de las variables. Vistazo rápido
+summary(datos)
+
+# Ver el reparto de las categorías de las variables cualitativas
+questionr::freq(datos$CalifProductor)
+
+# Para otros estadísticos
+psych::describe(Filter(is.numeric, datos)) #hay otro describe en otra libreria
+
+
+#' 
+#' Distintas formas de echar el vistazo a las distribuciones de las variables, donde prestaremos atención al *summary* que nos informa sobre cuartiles y media, así como valores perdidos y máximos. Así, observamos que *azucar* tiene valores 99999 sospechosos y *sulfatos* 604 valores ausentes (NA), que alcohol debe tener distribución asimétrica positiva por valores posiblemente altos, de hecho es un % y no debería superar 100. 
+#' 
+#' Podemos inspeccionar las distribuciones gráficamente para completar la exploración. Las funciones dfplot_box y dfplot_his están diseñadas para retornar una lista de boxplots o histrogramas de las variables continuas junto con los diagramas de barras para las variables categóricas (hacen uso de las funciones hist_cont, boxplot_cont y barras_cual). De esta forma podemos visualizar el dataset entero de un plumazo. 
+#' 
+## ---- warning=FALSE---------------------------------------------------------------------------------------------------
+# Inspección gráfica inicial
+listaGraf <- dfplot_box(datos) #Boxplots
+listaHist<-dfplot_his(datos) #Histogramas
+
+# para presentar una rejilla de graficos a nuestro gusto
+gridExtra::marrangeGrob(listaGraf, nrow = 3, ncol = 2)
+gridExtra::marrangeGrob(listaHist, nrow = 3, ncol = 2)
+
+#' 
+#' 
+#' ### Corrección de errores detectados
+#' 
+## ---------------------------------------------------------------------------------------------------------------------
+# Missings no declarados variables cualitativas (NSNC, ?)
+datos$Clasificacion<-recode.na(datos$Clasificacion,"?")
+
+# Missings no declarados variables cuantitativas (-1, 99999)
+datos$Azucar<-replace(datos$Azucar,which(datos$Azucar==99999),NA)
+
+# Valores fuera de rango
+datos$Alcohol<-replace(datos$Alcohol, which((datos$Alcohol < 0)|(datos$Alcohol>100)), NA)
+
+#Errores de escritura en variables cualitativas. 
+#datos$Etiqueta<-car::recode(datos$Etiqueta, "'b'='B';'m'='M';'mb'='MB';'mm'='MM';'r'='R'")
+
+#En este caso, se puede usar también "toupper()" y aprovechamos para ordenar niveles
+datos$Etiqueta<-factor(toupper(datos$Etiqueta), levels = c('MM','M','R','B','MB'))
+
+#Variables cualitativas con categorías poco representadas
+datos$CalifProductor<-car::recode(datos$CalifProductor, "c(0,1)='0-1';c(5,6,7,8,9,10,11,12)='5-12'")
+
+#' 
+#' Una vez libres de errores graves, las variables están preparadas para la gestión de outliers y missing. Para ello, es importante separa las variables objetivo y trabajar en el archivo de predictores. No es habitual tocar las variables objetivo puesto que representan nuestra verdad verdadera, son las variables de supervisión y se presuponen bien recogidas. 
+#' 
+#' Imaginemos que se nos presenta la situación en la que tenemos valores missing en las objetivo, que deberíamos hacer? Pues tratar estas instancias como un conjunto de test sobre el que podríamos hacer predicciones y valorar si el modelo parece tener sentido. El problema es que no podremos evaluar la calidad de las estimaciones mediante el error cometido puesto que no tenemos su verdad verdadera. 
+#' 
+## ---------------------------------------------------------------------------------------------------------------------
+#Indico la variableObj, el ID y las Input 
+# los atípicos y los missings se gestionan sólo de las input
+varObjCont<-datos$Beneficio
+varObjBin<-datos$Compra
+input<-as.data.frame(datos[,-(2:3)])
+input$ID<-as.numeric(datos$ID)
+
+#' 
+#' ## Valores atípicos 
+#' 
+#' Para facilitarnos la vida y complementar la idea que tenemos ya sobre las distribuciones de las variables, llevamos a cabo un conteo de los valores que se consideran extremos según un consenso de dos criterios distintos. En primer lugar, se distingue variable simétrica o posiblemente no, para aplicar *media + 3 sd* ó *mediana + 8 mad*, respectivamente. Recordamos en este punto que todas las medidas de dispersión basadas en la mediana o cuartiles son muy poco sensibles a la presencia de asimetría en la distribución, siendo por ello más fiables en este caso. Por otro lado, aplicamos el clásico criterio del boxplot umbrales en *cuartil1 - 3IQR* y *cuartil3+ 3IQR*. 
+#' 
+#' Antes de convertir aquellos valores detectados como outliers, valoramos la incidencia en cada variable contando la proporción de atípicos.
+## ---------------------------------------------------------------------------------------------------------------------
+##Atípicos
+# Cuento el porcentaje de atípicos de cada variable. 
+# Si son muchos, elimino esas 
+# variables en la siguiente línea de código
+sapply(Filter(is.numeric, input),
+       function(x) atipicosAmissing(x)[[2]])/nrow(input)
+
+
+# Tabla bonita para el % de atipicos por variable
+t<-data.frame(sort(
+  round(sapply(Filter(
+    is.numeric, input),function(nOut) atipicosAmissing(
+      nOut)[[2]])/nrow(input)*100,3), decreasing = T))
+names(t)<-"% Outliers por variable"
+
+# Formato normal
+t
+
+# Esta opción es útili para presentar tablas grandes en html
+#kable(t) %>%
+ # kable_styling(bootstrap_options = c("striped", "hover"))%>% 
+#scroll_box(width = "100%",height = "400px" )
+
+#' 
+#' Ya que la incidencia es baja, se decide transformar a missing los outliers encontrados
+#' 
+#' **Posponemos este paso para probar otros métodos disponibles en R**
+#' 
+#' Por supuesto, R es muy amplio y existen funciones para la gestión de outliers. Sin embargo, debido a que la identificación y tratamiento de outliers es un tema muy delicado que depende mucho de los datos que se están analizando, no hay claro consenso y se desaconseja la aplicación de métodos super automáticos para esta labor. 
+#' 
+#' En cualquier caso, puede resultar de utilidad recurrir a métodos multivariantes (tienen en cuanta no solamente la información de la variable en cuestión sino más bien trabajan con cada registro mirando todas las variables introducidas). De esta forma, se pueden identificar registros completos que se consideran atípicos respecto a la distribución general de los datos. 
+#' 
+#' Varias aproximaciones como mecanismos basados en clustering (función outliers.ranking), ciertos test estadísticos que arrojan la probabilidad de que una observación sea outlier (paquete outliers) y un método que probaremos basado en vecinos cercanos.  
+#' 
+#' - El método *Local Outlier Factor* (DMwR2) utiliza vecinos cercanos (es decir que sus distancias en el espacio R^k son pequeñas, lo que viene a decir que la distribución general de todas las variables es parecida) para generar un factor que toma valores para cada registro que son mayores cuanto más atípico se considera. Normalmente valores cercanos a 1 representan observaciones medias y son los valores más altos los que cabe sospechar que pueden ser registros atípicos. 
+#' 
+#' Entonces podemos adoptar la estrategia de calcular este factor y luego hacer una inspección de los registros más extremos para tomar conciencia de las razones por las que los son. 
+#' 
+#' Precauciones: 
+#' 
+#' - No acepta valores perdidos
+#' - Alta dependencia del valor k (número de vecinos a considerar)
+#' 
+## ---------------------------------------------------------------------------------------------------------------------
+
+# Aplicamos el algoritmo para obtener las puntuaciones
+ outlier.scores <- lofactor(na.omit(Filter(is.numeric, input)), k=20)
+ 
+# Pintamos la función de densidad de la distribución del factor 
+ plot(density(outlier.scores))
+ 
+# Extraemos la posición de los 5 registros más extremos 
+ outliers <- order(outlier.scores, decreasing=T)[1:5]
+ 
+# Filtramos el dataset introducido para observar estos registros 
+(na.omit(Filter(is.numeric, input))[outliers,] ->out5)
+ 
+ # Me guardo los ID de estos registros para luego
+ out5$ID -> ID_out5
+ 
+
+#' 
+#' Estaría bien compararlos con el vector de valores medios (o medianos) de las distribuciones de las variables para poder valorar cuales son las características más extremas.
+#' 
+## ---------------------------------------------------------------------------------------------------------------------
+data.frame(t(round(apply(na.omit(Filter(is.numeric, input)),2,mean),3)))
+
+#' 
+## ---------------------------------------------------------------------------------------------------------------------
+data.frame(t(round(apply(na.omit(Filter(is.numeric, input)),2,median),3)))
+
+#' 
+#' Es evidente que la variable azucar toma valores muy altos para los registros analizados pero, hay que tener en cuenta que la distribución de dicha variable tiene colas pesadas, lo que indica que existe gran carga de valores extremos a ambos lados de la media. Veamos de nuevo la distribución.
+#' 
+## ---------------------------------------------------------------------------------------------------------------------
+boxplot_cont(input$Azucar,nombreEje = 'Azucar')
+
+#' 
+#' Efectivamente estamos ante una distribución muy apuntada (muchos valores centrales) pero con gran carga de observaciones fuera de los bigotes del boxplot (a más de 1.5 veces el rango intercuartílico). Ante esta situación, sería muy peligroso utilizar alguno de los métodos que se pueden encontrar por ahí, como la eliminación de registros fuera de dichos bigotes ya que la merma en observaciones sería demasiado grande y nadie nos ha dicho que un valor de azucar de 70 sea descabellado... Es por esto que insisto en ser conservadores con la identificación de outliers, y por eso utilizamos 3 veces el rango intercuatílico en lugar de 1.5. 
+#' 
+#' Comentamos el registro con ID = 216 que parece bastante extremo en general. Si observamos los valores de ácido cítrico, cloruro sódico y sulfatos, nos damos cuenta de que todos ellos están lejos de la media y mediana de la distribución. Por otra parte el precio de la botella es bastante alto. Este tipo de registros son los que merecerían una atención especial. Aún así, no podemos concluir a la ligera que se trate de errores de medición ni que estos valores sean outliers perse. 
+#' 
+#' Como pequeño resumen, lo que buscamos con el tratamiento de outliers es identificar valores verdaderamente extremos y que no sea típicos, lo cual necesariamente implica que han de ser pocos!! Y esto es muy relevante. Si son el 20% de los registros...pues tal vez estamos ante dos poblaciones distintas... habría que abordar el problema de otra forma..tal vez tratar cada población por separado.
+#' 
+#' Lo que ahora me planteo es comparar esos 5 registros extremos detectados por lof y ver como quedarían tras la aplicación de nuestro método de detección univariante basado en el consenso de criterios conservadores. Para ello vamos a aplicar nuestra función atípicosAmissing con el argumento [[1]] para cambiar los outlier detectados por NA. 
+#' 
+## ---------------------------------------------------------------------------------------------------------------------
+# Modifico los atípicos como missings
+input[,as.vector(which(sapply(
+  input, class)=="numeric"))]<-sapply(Filter(
+    is.numeric, input),function(x) atipicosAmissing(x)[[1]])
+
+
+# Filtramos los ID del top 5 de outliers detectados por lof
+input[input$ID %in% ID_out5,]
+
+#' 
+#' Observamos que bajo nuestro compendio de criterios transformamos a NA la variable azucar de todos los registros, quedando las demás variables sin alteraciones. Es evidente que el método de los vecinos ha presentado gran dependencia de la variable Auzucar. Esto puede deberse a la diferencia en escala de medida, haciendo que valores más grandes tengan mayor peso en la puntuación final obtenida. 
+#' 
+#' Muchas alternativas disponibles, lo importante es conocer las fortalezas y debilidades de cada uno y aplicarlo con lógica según resulte más conveniente para los datos que manejamos. 
+#' 
+#' ## Valores perdidos 
+#' 
+#' Entramos de lleno en la segunda gran gestión que debemos llevar a cabo antes de la modelización. Los archiconocidos valores perdidos. En primer lugar comentar que, llegados a este punto tenemos valores perdidos de dos fuentes distintas, por una parte los que vienen "de serie" en el dataset que podemos asociar a falta de medida en la recogida de los datos y aquí existe toda una teoría sobre los mecanismos de aparición de dichos missing, completamente al azar (MCAR), al azar(MAR) o nada de azar y existe patrón (MNAR). 
+#' 
+#' Dejo por aquí un poco más de información y diversos métodos propuestos para la imputación de estos valores. 
+#' 
+#' https://stefvanbuuren.name/fimd/sec-MCAR.html
+#' 
+#' Nuestro objetivo, en este limitado módulo, será valorar la incidencia de los valores perdidos y conocer los métodos usuales de imputación univariante (cada variable independientemente de las otras) con sus pros y contras. 
+#' 
+#' Que podemos hacer con los missings? 
+#' 
+#' 1) Nada 
+#' 
+#' Podemos obviar la presencia de valores perdidos y ya el modelo se encargará de quitarlos "por lista", es decir, eliminar del análisis toda observación con al menos un NA. Esto es habitual y se puede hacer, ahora bien no está exento de peligros. Veamos.
+#' 
+#' - Peligro de los missings cruzados. Imaginamos el caso en que tenemos 10 variables y 100 registros y cada una de ellas tiene un 5% de perdidos...No parece mucho con lo cual los quitamos por lista. Nuestro pensamiento es 5% pero, si se da el caso de que los NA de cada variable aparecen en registros distintos...entonces tenemos 5*10= 50% de los registros con al menos un perdido...hemos perdido la mitad de la información!!! 
+#' 
+#' - Sesgo por valores perdidos. El simple hecho de eliminar observaciones por el mero hecho de que presenten perdidos puede introducir un importante sesgo de selección de registros en los modelos. Imaginemos que la gente mayo tiende a no contestar ciertas preguntas en una encuesta, eliminamos y nos quedamos con muy poca gente mayor por lo que las conclusiones con toda seguridad estarán sesgadas hacia los jóvenes. 
+#' 
+#' 2) Imputar sus valores. 
+#' 
+#' No queremos exponernos a lo anterior por lo que se puede adoptar la estrategia de asignar un valor a estos datos no conocidos. 
+#' 
+#' - Imputación por valores centrales (media, mediana): Muy habitual asignar valores centrales ya que no alteran la distribución de las variables como tal. El gran inconveniente de este método es a subestimación de la verdadera varianza de la variable ya que estamos centrando demasiado la distribución haciendo que artificialmente su varianza se reduzca, en ocasiones muy drásticamente. 
+#' 
+#' - Imputación por valores aleatorios: Si no queremos centrar tanto la distribución, podemos optar por asignar al azar valores observados de las distribuciones de cada variable a los registros con NA. De esta forma, cualquier valor en el rango observado puede ser asignado a los faltantes. El gran inconveniente de esto es la dependencia del azar.
+#' 
+#' - Imputación por modelos multivariantes: Muchas opciones en este apartado. Existen métodos que tienen en cuenta los valores observados de otras variables para asignar el valor más "plausible" a la variable perdida en un sentido conjunto. Una de las alternativas es generar imputaciones por un modelo de regresión por ejemplo, así para imputar Azucar utilizaremos un modelo que estime los valores de azucar en base a las demás variables (que se ajustará con los valores validos por lista) y posteriormente predeciremos los perdidos de azucar mediante este modelo generado. De esta misma forma existen modelos de imputación por random forest (missforet), vecinos más cercanos (knn), cadenas de Markov (hmisc, amelia) y gran cantidad de aproximaciones de imputación múltiple (imputar n veces y promediar). El mayor problema de estos métodos suele radicar en el posible sobreajuste a los datos de training. 
+#' 
+#' Podemos echar un vistazo a la correlación en la existencia de missings para valorar si existe algún patrón de aparición de los mismos. En caso de que observemos patrones de aparición, podemos tirar del hilo e indagar el porqué de ese comportamiento para decidir el método más adecuado para imputar. En este caso no observamos patrón alguno. 
+#' 
+## ---------------------------------------------------------------------------------------------------------------------
+## MISSINGS
+#Busco si existe algún patrón en los missings, que me pueda ayudar a entenderlos
+corrplot(cor(is.na(input[colnames(
+  input)[colSums(is.na(input))>0]])),method = "ellipse",type = "upper") 
+#No se aprecia ningún patrón
+
+#' 
+#' El primer paso es valorar la incidencia de los valores perdidos ya que si no representan gran proporción, no existe gran peligro de cambio en la distribución de las variables con independencia del método utilizado para la imputación.  
+#' 
+#' 
+#' - Missings por variable.
+#' 
+## ---------------------------------------------------------------------------------------------------------------------
+prop_missingsVars<-apply(is.na(input),2,mean) # Por variable
+
+# Tabla bonita para el % de missing por variable
+t<-data.frame(sort(prop_missingsVars*100, decreasing = T))
+names(t)<-"% Missing por Variable"
+t
+
+#' 
+#' Cuidadito con clasificación...Esto recordemos que se debe a esa ? que hemos convertido en NA. Ya que estos valores representan más de 1/4 de los registros parece que se merecen una categoría propia! 
+#' 
+## ---------------------------------------------------------------------------------------------------------------------
+#Recategorizo categóricas con "suficientes" observaciones missings
+input$Clasificacion<-car::recode(input$Clasificacion,"NA='Desconocido'",as.factor = T)
+
+
+#' 
+#' Controlado esto, vemos que sulfatos es la variable más peligrosa con un 11% de perdidos..Digamos que es la variable en la que mayores dudas tenemos respecto a la conservación de su distribución tras la imputación. Por lo demás, valores relativamente bajos. 
+#' 
+#' 
+#' - Missings por observación.
+#' 
+#' Calcularemos ahora el % de missings por observación y vamos a aplicar un truquiflor que a veces nos ayuda mucho a controlar las imputaciones. Se trata de generar una variable en el archivo que cuanta la proporción de perdidos que tiene cada registro. De esta forma siempre tenemos una huella de los registros con alta carga de imputaciones por si necesitamos saber algo sobre ellos en la etapa de modelado. Es más, esta será una variable que incluiremos en el modelo para valorar si puede generar un patrón de comportamiento respecto a la variable objetivo. 
+#' 
+#' 
+## ---------------------------------------------------------------------------------------------------------------------
+#Proporción de missings por variable y observación
+input$prop_missings<-apply(is.na(input),1,mean) # Por observación
+summary(input$prop_missings)
+
+#' 
+#' Vamos a ordenar el archivo por la nueva variable creada para ver el aspecto.
+#' 
+## ---------------------------------------------------------------------------------------------------------------------
+input %>% arrange(desc(prop_missings)) %>% slice_head(n=5)
+
+#' 
+#' 
+#' El siguiente código pretende eliminar registros y observaciones con más de la mitad de su información perdida puesto que resulta arriesgado imputar tal cantidad de datos perdidos. Es evidente que en nuestro caso no aplica y si lo ejecutamos no habrá cambio alguno.
+#' 
+#' Es importante saber que tenemos que aplicar el mismo filtro a las variables objetivo para que al unir el input depurado con ellas, los registros cuadren! 
+#' 
+## ---------------------------------------------------------------------------------------------------------------------
+#elimino las observaciones y las variables con más de la mitad 
+# de datos missings (si no hay ninguna, no ejecuto este código)
+input %>% filter(prop_missings< 0.5) %>% select(!(names(
+  prop_missingsVars)[prop_missingsVars>0.5]))-> imput 
+
+#Actualizar las observaciones de las variables objetivo
+varObjBin<-varObjBin[input$prop_missings<0.5] 
+varObjCont<-varObjCont[input$prop_missings<0.5]
+
+#' 
+#' 
+#' Vamos a centrar nuestros esfuerzos en la imputación simple teniendo en cuenta únicamente las distribuciones marginales de las variables. Con la función ImputacionCuant() podemos aplicar imputaciones por media, mediana o aleatorio a las variables que presentan missings. Así mismo, se puede hacer uso de funciones de R como impute de Hmisc (aplicado en comentario). La diferencia que encuentro en la opción aleatorio (random en Hmisc) es que nuestra función asigna valores aleatorios pero con probabilidades según la función de distribución de la propia variable, siendo algo más probable asignar un valor más central que un valor más extremo. En Hmisc la aleatoriedad es pura hasta el punto que conozco. 
+#' 
+## ---------------------------------------------------------------------------------------------------------------------
+
+## Imputaciones
+# Imputo todas las cuantitativas, seleccionar el tipo 
+# de imputación: media, mediana o aleatorio
+input[,as.vector(which(sapply(input, class)=="numeric"))]<-sapply(
+  Filter(is.numeric, input),function(x) ImputacionCuant(x,"aleatorio"))
+
+# input[,as.vector(which(sapply(input, class)=="numeric"))]<-sapply(
+#  Filter(is.numeric, input),function(x) Hmisc::impute(x,"random"))
+
+#' 
+#' Para las variables categóricas podemos utilizar moda (la categoría más representada) o aleatorio. Hmisc solamente tiene implementada la moda. 
+#' 
+## ---------------------------------------------------------------------------------------------------------------------
+# Imputo todas las cualitativas, seleccionar el tipo
+# de imputación: moda o aleatorio
+# Si solo se quiere imputar una, variable<-ImputacionCuali(variable,"moda")
+input[,as.vector(which(sapply(input, class)=="factor"))]<-sapply(
+  Filter(is.factor, input),function(x) ImputacionCuali(x,"aleatorio"))
+
+# A veces se cambia el tipo de factor a character al imputar, 
+# así que hay que indicarle que es factor
+input[,as.vector(which(sapply(input, class)=="character"))] <- lapply(
+  input[,as.vector(which(sapply(input, class)=="character"))] , factor)
+
+# Reviso que no queden datos missings
+summary(input)
+
+#' 
+#' 
+#' 
+## ---------------------------------------------------------------------------------------------------------------------
+# Es posible que quede algún missing sin imputar en variable numéricas...
+# algún pequeño fallo en la función. La pasamos de nuevo si es necesario! 
+if (any(is.na(input))){
+input[,as.vector(which(sapply(input, class)=="numeric"))]<-sapply(
+  Filter(is.numeric, input),function(x) ImputacionCuant(x,"aleatorio"))
+# Reviso que no queden datos missings
+summary(input)
+}
+
+# Una vez finalizado este proceso, se puede considerar 
+# que los datos están depurados. Los guardamos
+saveRDS(cbind(varObjBin,varObjCont,input),"datosVinoDep.RDS")
+
+#' 
+#' Ya tenemos los datos depurados para poder empezar con el modelado. Es importante saber que a la hora de modelar utilizaremos este nuevo conjunto **datosVinoDep** y no el original, que para eso nos lo hemos trabajado. 
+#' 
+#' 
