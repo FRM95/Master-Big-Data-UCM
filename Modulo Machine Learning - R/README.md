@@ -9,7 +9,9 @@ Actualización a 22/04/2022:
   Mejor puntuación obtenida: 0.8222
   
 Metodología empleada: depuración previa de los datos y método de clasificación RandomForest.
-  
+
+Web del concurso: https://www.drivendata.org/competitions/7/pump-it-up-data-mining-the-water-table/
+
 # Data Driven Contest: Pump It Up, Data Mining the Water Table using R
 
 Participation in Data Driven web data classification contest.
@@ -22,3 +24,4 @@ Update at 04/22/2022:
   
 Methodology used: previous data depuration and RandomForest ranking method.
 
+Contest web: https://www.drivendata.org/competitions/7/pump-it-up-data-mining-the-water-table/
