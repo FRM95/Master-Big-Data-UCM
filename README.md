@@ -1,6 +1,6 @@
 # Master Big Data: Data Science UCM 2021/2022
 
-Repository with own projects carried out during the master's degree.
+Repository with own projects carried out during this postdegree.
 
 Programming languages used: R, Python, SQL and Scala.
 
