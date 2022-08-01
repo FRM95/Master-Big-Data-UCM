@@ -1,6 +1,6 @@
 # Master Big Data: Data Science UCM 2021/2022
 
-Repository with all the practices and projects carried out during the master's degree.
+Repository with own projects carried out during the master's degree.
 
 Programming languages used: R, Python, SQL and Scala.
 
@@ -11,7 +11,7 @@ For more information related to the code or use of the files do not hesitate to 
 Cheers! :)
 
 # 
-Repositorio con todas las prácticas y proyectos realizados durante el máster.
+Repositorio con proyectos propios realizados durante el máster.
 
 Lenguajes de programación utilizados: R, Python, SQL y Scala.
 
