@@ -1,0 +1,359 @@
+---
+title: 'Módulo Minería de datos: Técnicas no supervisadas'
+author: "Miguel Moreno Mardones"
+date: "8 de Marzo de 2022"
+output:
+  word_document: default
+  html_document: default
+subtitle: 'Master Big Data: Data Science - UCM'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r inicio, include=FALSE, echo=FALSE}
+#Cargamos directorio de trabajo
+
+#Cargo las funciones que voy a utilizar después
+source("Funciones_Clust.R")
+source('Funciones_R.R')
+#Cargo las librerias que me van a hacer falta
+paquetes(c('questionr','psych','car','corrplot','ggplot2',"gridExtra",'kableExtra','dplyr','DMwR2','caret','pROC','ISLR', 'GPArotation',"factoextra","cluster","fpc", "clValid","readxl",'devtools',"qgraph","FactoMineR","RcmdrMisc"))
+#Cargar dataset
+DatosEleccionesEsp <- read_excel("DatosEleccionesEspaña.xlsx")
+```
+
+## Introducción
+
+En este documento nos adentramos en la parte de técnicas no supervisadas de la minería de datos, concretamente los algoritmos de Clustering o algoritmos de agrupamiento. La idea de este conjunto de técnicas reside en la creación de grupos llamados "clusters" mediante la búsqueda de patrones comunes y diferenciadores en un conjunto de observaciones. Maximizando así la homogeneidad entre observaciones pertenecientes a un cluster y minimizandola en el caso de los grupos generados con nuestros datos.
+
+Utilizaremos por lo tanto el conjunto de datos proporcionado en el módulo: DatosEleccionesEspaña.xlsx, en el que trataremos de realizar agrupaciones de datos sobre caractéristicas (sociológicas, demográficas..) de las comunidades autónomas de España en base a las elecciones.
+
+Como hicimos en la parte I de este módulo, el primer paso es realizar una inspección de los datos proporcionados, para ello usaremos de nuevo el comando str(), así tendremos una visión general del conjunto. Hay que recordar que el dataset debe estar cargado en nuestro espacio de trabajo.
+
+```{r }
+#Realizamos una inspeccion previa de los datos
+str(DatosEleccionesEsp)
+summary(DatosEleccionesEsp)
+```
+
+## Paso previo: Depuración de los datos e inspección del conjunto
+
+Examinando el dataset, observamos que existen algunas columnas de carácter dicotómico representadas como numéricas, debemos transformarlas a factor para que R no las detecte como tal. Es el caso de las columnas CodigoProvincia, AbstencionAlta, Izquierda y Derecha. Las variables Densidad y ActividadPpal se encuentran representadas como character siendo variables cualitativas con varios niveles, las transformamos igualmente a factor.
+
+```{r transformaciones previas, include=FALSE, echo=FALSE, message=FALSE, warning=FALSE}
+#Transformacion de variables cualitativas
+DatosEleccionesEsp$CodigoProvincia <- as.character(DatosEleccionesEsp$CodigoProvincia)
+DatosEleccionesEsp$AbstencionAlta <- as.factor(DatosEleccionesEsp$AbstencionAlta)
+DatosEleccionesEsp$Izquierda <- as.factor(DatosEleccionesEsp$Izquierda)
+DatosEleccionesEsp$Derecha <- as.factor(DatosEleccionesEsp$Derecha)
+DatosEleccionesEsp$Densidad <- as.factor(DatosEleccionesEsp$Densidad)
+DatosEleccionesEsp$ActividadPpal <- as.factor(DatosEleccionesEsp$ActividadPpal)
+```
+
+Una vez acabado con las variables cualitativas, debemos valorar la posibilidad de transformar aquellas variables numéricas con valores extraños, no valores atipícos o perdidos (NA), esos lo trataremos después. En Explotaciones tenemos un caso con un valor 99999. Densidad posee valores con valor "?". Asumimos que existen varias columnas con porcentajes (aunque no tengan la terminación _Ptge) como son PobChange_pct, SameComAutonPtge, ForeignersPtge que poseen algún valor menor o mayor que 100, obviamente esto no puede suceder al ser una columna de porcentajes, deberán ser igualmente cambiados.
+
+```{r transformaciones, include = FALSE, echo = FALSE, message=FALSE, warning=FALSE}
+#Transformaciones numéricas 
+DatosEleccionesEsp$PobChange_pct<-replace(DatosEleccionesEsp$PobChange_pct, which((DatosEleccionesEsp$PobChange_pct < 0)|(DatosEleccionesEsp$PobChange_pct>100)), NA)
+DatosEleccionesEsp$SameComAutonPtge<-replace(DatosEleccionesEsp$SameComAutonPtge, which((DatosEleccionesEsp$SameComAutonPtge < 0)|(DatosEleccionesEsp$SameComAutonPtge>100)), NA)
+DatosEleccionesEsp$ForeignersPtge<-replace(DatosEleccionesEsp$ForeignersPtge, which((DatosEleccionesEsp$ForeignersPtge < 0)|(DatosEleccionesEsp$ForeignersPtge>100)), NA)
+DatosEleccionesEsp$Densidad<-recode.na(DatosEleccionesEsp$Densidad,"?")
+DatosEleccionesEsp$Explotaciones<-replace(DatosEleccionesEsp$Explotaciones,which(DatosEleccionesEsp$Explotaciones==99999),NA)
+
+```
+
+Podemos obtener el conjunto de valores extremos u outliers que aparecen en las variables numéricas del dataset y que podrían afectar a los valores de tendencia central. Estas variables también deberían ser tratadas. 
+
+```{r , echo = FALSE}
+valAtip <- data.frame(sort(
+  round(sapply(Filter(
+    is.numeric, DatosEleccionesEsp),function(nOut) atipicosAmissing(
+      nOut)[[2]])/nrow(DatosEleccionesEsp)*100,3), decreasing = T))
+names(valAtip)<-"% Outliers en variables numericas"
+
+#Llamamos a la función
+valAtip
+```
+
+Como hemos visto en la función anterior, estos pertenecen en su mayoría a variables absolutas numéricas. Si nuestra intención es conformar un subconjunto de datos de variables absolutas podríamos tratarlas, sin embargo, veo muy probable el uso de variables que muestren los porcentajes ya que creo que se puede explicar los grupos de clúster de mejor manera. Por lo tanto no realizaremos ninguna modificación ya que el porcentaje de outliers en las variables con terminación Ptge/Pct es muy bajo.
+
+Adicionalmente, estamos tratando con datos de todo el territorio nacional, por lo que sería incorrecto dejarnos en el tintero datos que probablemente sean relevantes unicamente porque puedan considerarse outliers. Por ejemplo la CCAA de Madrid o Cataluña, donde el porcentaje de población, empresas, servicios.. pueden llegar a ser muy altos.
+
+Una vez definido el tratamiento de los valores atípicos, nos disponemos a averiguar como operar con los valores perdidos (NA). Por lo que buscamos las columnas donde puede aparecer algún NA. Por lo tanto, tras las modificaciones que vendrán a continuación, el objetivo sería trabajar con el dataset depurado de outliers: DatosEleccionesEspDep.
+
+```{r, include=FALSE, warnings = FALSE}
+#Eliminamos la columna de PobChange_pct ya que de 8119 valores, posee 5986 NA's
+DatosEleccionesEsp$PobChange_pct <- NULL
+
+#Aplicamos la transformacion aleatoria de valores perdidos en las variables cualitativas
+DatosEleccionesEsp2 <- DatosEleccionesEsp #hago una copia para no perder los datos
+DatosEleccionesEsp2[,as.vector(which(sapply(DatosEleccionesEsp2, class)=="factor"))] <- sapply(
+  Filter(is.factor, DatosEleccionesEsp2),function(x) ImputacionCuali(DatosEleccionesEsp2$Densidad,"aleatorio"))
+DatosEleccionesEsp2$Densidad <- as.factor(DatosEleccionesEsp2$Densidad)
+DatosEleccionesEspDep <- DatosEleccionesEsp2 #si el cambio se ha realizado lo borramos
+rm(DatosEleccionesEsp2, valAtip)
+
+#Aplicamos la transformacion aleatoria como hicimos en la entrega anterior para las variables cuantitativas
+DatosEleccionesEspDep[,as.vector(which(sapply(DatosEleccionesEspDep, class)=="numeric"))]<-
+sapply(Filter(is.numeric, DatosEleccionesEspDep),function(x) ImputacionCuant(x,"aleatorio"))
+
+while (any(is.na(DatosEleccionesEspDep))){
+DatosEleccionesEspDep[,as.vector(which(sapply(DatosEleccionesEspDep, class)=="numeric"))]<-
+sapply(Filter(is.numeric, DatosEleccionesEspDep),function(x) ImputacionCuant(x,"aleatorio"))
+}
+
+```
+
+Obtenemos así una gran cantidad de valores NA en la columna de PobChange_pct. Por lo que decidimos eliminarla, ya que de 8119 valores, un total de 5986 son NA, una cantidad superior al 50% de datos de esta variable. En cuanto a las columnas cuantitativas y cualitativas restantes, procedemos de manera similiar a la anterior entrega, imputando los NA por valores pseudo-aleatorios.
+
+```{r numero de valores NA}
+#Mediante este código obtenemos las columnas que contienen un valor NA
+names(which(colSums(is.na(DatosEleccionesEsp))>0))
+
+#Cantidad de NA's en nuestro dataset
+sum(is.na(DatosEleccionesEspDep))
+```
+
+Tras esto, ya podemos comenzar con el desarrollo del método de agrupamiento o clustering sobre nuestro conjunto de datos depurado.
+
+
+## Clustering Jerárquico
+
+Las 10 variables escogidas para formar nuestro subconjunto de datos están relacionadas con características sociológicas y políticas de los ciudadanos por CCAA, por lo que no tenemos en cuenta variables que explican el desarrollo de dichas comunidades si no que nos centramos en los individuos. La manera de generar la agregación de datos ha sido a través de la media de dichos valores. 
+
+```{r creacion del dataset para el cluster}
+#Creacion del dataset reducido mediante agregacion por la media de las CCAA
+#Eleccion de las 10 columnas numericas
+DatasetCluster <- DatosEleccionesEspDep[,c(3,6,8,9,10,14,15,16,22,23,24)] 
+#Agregacion por CCAA y por la media de los valores mediante dplyr()
+DatasetCluster <- DatasetCluster %>% group_by(CCAA) %>% dplyr::summarise(across(everything(), list(mean))) #Por la media
+colnames(DatasetCluster) <- c('CCAA','PctAbstencion','PctIzq','PctDch','PctOtros','PctPob-19','PctPob19a65',
+                              'PctPob+65','PctDesempleo-25','PctDesempleo25a40','PctDesempleo+40')
+str(DatasetCluster)
+```
+
+Optamos por no realizar una escalada de datos, ya que las unidades de medida entre variables no difieren entre sí (variables en su totalidad asociadas a lo porcentajes con rango [0-100]). 
+
+Ya que el objetivo es maximizar la homogeneidad entre indivduos de los grupos, el clústering jerárquico requiere establecer previamente una medida de similitud o proximidad entre dichas observaciones. Aquí disponemos de varias opciones para seleccionar como: la distancia euclídea, distancia manhattan, pearson, mahalanobis.. estos son algunos ejemplos de ellas. La elección de esta medida será muy importante para el psoterior desarrollo del clústering jerárquico. 
+
+```{r update del dataset, include=FALSE}
+#Debemos quitar la columna cualitativa de CCAA
+DatasetCluster.esc <- DatasetCluster[,-c(1)]
+#Aplicamos los nombres de CCAA como nombres de filas
+rownames(DatasetCluster.esc) <- DatasetCluster$CCAA
+```
+
+Podemos tratar de obtener las posibles correlaciones entre las observaciones, si llegamos a comprobar la existencia de dichas correlaciones entre las variables del conjunto, una solución posible sería aplicar la distancia Pearson o Kendall de correlación como máxima similitud.
+
+```{r correlations}
+#Vemos la posible correlacion
+corrplot::corrplot(cor(DatasetCluster.esc))
+```
+
+Es cierto que hay distintos tipos de correlaciones entre variables, sin embargo, existen algunas variables que poseen bajos niveles de correlación frente a las restantes varibles, como son el porcentaje de Izquierda, Derecha y Otros. Por ello descartamos el uso de estas dos distancias de similitud. Normalmente R utiliza la distancia euclídea para crear los dendogramas de manera automática, pero, la distancia manhattan, nos sirve para aquellos datos que necesitan mayor robustez frente a valores atípicos. Algunos porcentajes o medidas de nuestro dataset pueden estar influidas por estos valores, por lo que decidimos utilizar esta distancia.
+
+```{r eleccion de dendograma en cluster jerarquico}
+#Exploracion de clustering jerárquico con distintos Linkages y usando la distancia manhattan como valor de similitud
+set.seed(123)
+methods <- c("complete","average","ward.D2","mcquitty","single")
+hclist <- list()
+val.hc <- c()
+for (i in 1:length(methods)){
+  hc=hclust(dist(DatasetCluster.esc, method = "manhattan"), method =methods[i])
+  hclist[[i]]<-hc
+ print(fviz_dend(hc,k = 5, cex = 0.5, color_labels_by_k = T, rect = T) + ggtitle("Herarchical clustering") +
+         labs(subtitle = paste('Metodo de linkage:', methods[i]," -  Distancia Manhattan, K = 5")))
+ #Validación interna
+ cl <- cutree(hc, k = 5) 
+ md.val <- medidasVal(DatasetCluster.esc,cl,cl,methods[i])
+ 
+ #Generar vector de medidas de validacion para el hieararchical
+ val.hc<- rbind(val.hc,md.val) 
+}
+
+names(hclist) <- rownames(val.hc) <- methods
+```
+
+Para interpretar un dendograma deberemos observar la altura en la que se ramifican las observaciones, la altura en la que se generan los ditintos grupos y los propios grupos generados.
+
+Observamos pues, que las distancias de desimilitud (linkage) más óptimas pertenecen al método Ward.D2 o al método complete, ya que sus ramas se unen más alto en el eje horizontal (mayor altura, mayor diferencias entre clústers), por lo que ambos dendogramas podrían ser una posible solución.
+
+Sin embargo, debido a que la altura horizontal entre las ramas del dendograma del ward.D2 es más baja en comparación al complete (observaciones más similares cuanto menor sea la altura horizontal de unión de ramas), y la altura horizontal entre clústeres generados es ligeramente superior, decidimos utilizar el método de linkage de ward.D2 para k = 5 clústers. 
+¿Porqué el valor de k = 5 grupos? La cantidad idónea de grupos escogida la hemos definido mediante el dendograma, ya que si comparamos un dendograma con k = 4 y mismo linkage, se mantienen los grupos restantes sin variar las alturas horizontales pero poseemos unicamente dos grupos con máximo 2 observaciones, deseamos poder apreciar las diferencias entre CCAA, por lo que al mantenerse las alturas, creamos mayor cantidad de grupos. Otro método para decidir el valor idóneo de centroides, es aplicando el método elbow (método del codo) sobre la función de K-Means (ya que es el método que aplicaremos) para un rango de k grupos mediante la medida de suma de los cuadrados de las distancias o WCSS. 
+
+```{r metodo elbow}
+#Metodo elbow para seleccionar la cantidad de centroides
+set.seed(23)
+fviz_nbclust(x = DatasetCluster.esc, FUNcluster = kmeans, method = "wss", k.max = 15, 
+             diss = get_dist(DatasetCluster.esc, method = "manhattan"), nstart = 50)
+```
+
+Aquí vemos que la curva comienza a estabilizarse a lo largo del eje X para un número de clústers 4, 5 o hasta 6, minimizando la distancia de suma de cuadrados. Por lo seleccionar cualquiera de estos k valdría como solución para la cantidad de grupos a obtener.
+
+## Clustering K-means 
+
+Tras realizar el algoritmo de agrupamiento jerárquico, aplicamos el método de algoritmo K-means para un total de 5 grupos sobre nuestro conjunto reducido de datos y depurados. El objetivo de K-Means objetivo es crear los grupos con observaciones en la que cada observación pertenecerá al grupo cuyo valor medio es más cercano. 
+
+```{r kmeans}
+#Exploramos el algoritmo de agrupamiento k-means con 5 grupos
+#Aplicamos una semilla
+set.seed(12)
+km.out = kmeans(DatasetCluster.esc, 5 , nstart = 15)
+fviz_cluster(km.out, data = DatasetCluster.esc, ellipse.type = "convex", palette = "Set2", repel = TRUE, labelsize = 8, main = "Clustering K-means")
+```
+
+Obtenemos diferencias significativas entre los clústers de las CCAA de Cataluña y País Vasco así como Ceuta y Melilla, por lo que de alguna manera, habrá alguna variable de nuestro conjunto de datos que sea diferenciadora, ya que otros clústeres están más proximos entre sí, compartiendo características parejas y distancias de desimilitud más cercanas. 
+
+Un dato curioso es la gran distancia de similitud en Ceuta y Melilla (esto quiere decir que las observaciones de estos dos individuos poseen registros muy parejos), mientras que en Cataluña y País Vasco, pese a pertenecer al mismo clúser, tienen una menor distancia de similitud, están más separadas del valor medio (centroide). Algo similar ocurre con La Rioja, Aragon, Castilla y León, y Castilla-La Mancha, sus puntos en el gráfico están muy cerca unos de otros, por lo que este clúster posee una gran robustez de similitud entre las observaciones que lo conforman.
+
+Los resultados obtenidos no son sencillos de interpretar, pero conociendo las variables de nuestros datos, pueden darnos alguna idea de porqué hay CCAA tan alejadas y otras tan cerca. Sin embargo, esto podría no ser así, ya que podríamos haber escogido un valor de k grupos incorrecto, pueden aparecer datos no separables o incluso medidas de centroides negativas que nos entorpecen los resultados interpretativos. 
+
+Aplicamos ahora entonces el método de HK-Means (híbrido) sobre el mismo conjunto de datos, este proporciona los resultados del clúster jerárquico inicial (dendograma) y los resultados del K-means con los centroides iniciales del ejemplo anterior, por lo que puede proporcionar más seguridad a la hora de su desarrollo.
+
+```{r kmeans hibrido }
+#Exploramos el algoritmo de agrupamiento hk-means con 5 grupos
+#Aplicamos una semilla
+set.seed(123)
+hkm.out = hkmeans(DatasetCluster.esc,5)
+fviz_cluster(hkm.out, data = DatasetCluster.esc, ellipse.type = "convex", palette = "Set2", repel = TRUE, labelsize = 8, main = "Clustering HK-means")
+
+#Construimos el dendograma de HK-Means
+#hkmeans_tree(hkm.out, cex = 0.5)
+fviz_dend(hkm.out, k = 5, cex = 0.5, color_labels_by_k = T, rect = T) + ggtitle("Cluster Jerárquico de HKMeans -  k = 5")
+```
+
+```{r medidas kmeans, kmeans hibrido y jerarquicos con linkages}
+#Extraemos las medidas de validacion en ambos metodos de K-Means
+md.km <- medidasVal(DatasetCluster.esc,km.out$cluster,km.out$cluster,'k-means')
+md.hk <- medidasVal(DatasetCluster.esc,hkm.out$cluster,hkm.out$cluster,'hybrid k-means') 
+
+#Extraemos las medidas de todos los cluster aplicados hasta el momento
+ValT <- rbind(val.hc,md.km,md.hk) 
+ValT
+```
+
+Los datos representados más arriba muestran los valores de silueta (rango entre 0-1 que mide como de compactos son los puntos de un cluster en comparación con el resto), WSS o suma de cuadrados interna de cada cluster (distancia entre los puntos internos de un cluster) e indices Rand y VI de todos y cada uno de los clústeres realizados. Desde K-Means, K-Means Híbrido y Jerárquico (junto a todos los linkage realizados). 
+
+Para facilitar la interpretación de los métodos escogidos y decidir si son los idóneos, observaremos, los valores de Silueta media y WSS. 
+
+Estos valores de Silueta Media y WSS para las variables md.km y md.hk (K means y HK means) son idénticos, por lo que ambos procesos de clúster K-Means y HK-Means no poseen ningún tipo de diferencia para un número de grupos k = 5. El WSS es en general menor respecto a los demás clusters, por lo que las observaciones internas en los clústers generados son las más similares respecto a los demás métodos.
+
+El método jerárquico elegido (Ward.D2) toma un valor de WSS muy similar a los generados de K-Means, sin embargo, el jerárquico mediante linkage mcquitty y complete nos da como resultado exactamente el mismo valor. ¿Porqué no tomamos dichos métodos de linkage en vez de Ward.D2?. La diferencia de WSS entre Ward.D2 y K-Means es mínima, pero la silueta media de Ward.D2 respecto a mcquitty y complete es mayor, además la cantidad y observaciones en los grupos que se generaban nos parecían más interpretables, por lo que consideramos que es una buna solución escogida. 
+
+La aplicación previa del algoritmo de clúster jerárquico + la idea del método elbow a la hora de determinar los datos del algoritmo K-Means nos ha servido para seleccionar la cantidad de 5 grupos o centroides previos, por lo que sí se trata de información útil para afrontar de manera previa este agrupamiento. A priori ibamos a escoger K = 4 de una manera inicial, pero la interpretabilidad se veía reducida y sus valores de Silueta media = 0.3443125 y Within SS = 3914.929 demuestran que no era la mejor solución a aplicar.
+
+## Análisis de reducción de dimensiones 
+
+Se realiza un análisis de reducción de dimensiones de variables para tratar de dar una igual o incluso mejor interpretación sobre el conjunto de datos. Algunos métodos para ello son el análisis mediante componentes principales (PCA) o a través del método factorial (AF). ¿Cuál es el motivo para realizarlo? nuestro conjunto de datos puede poseer una dimensionalidad que en ocasiones entorpece la infomación y sus posibles patrones de conducta. Para evitar este problema aplicamos los métodos de reducción de dimensionalidad, Pudiendo generar mejores resumenes, mejorar la posible relación generada entre predictores y variables a predecir en el caso de los modelos de regresión, eliminar el ruido de los datos como son las variables poco representadas, con poco valor en el dataset...
+
+PCA o análisis de componentes principales
+
+Es necesario observar si se cumple la condición deseable de correlación de variables. Como vimos arriba en el gráfico de correlaciones, efectivamente existen correlaciones significativas entre las variables salvo en el caso del PctIzq, PctDch y PctOtros que no muestran niveles significativos respecto a las otras, salvo en el porcentaje de desempleo. Es probable que las componentes principales del PCA no lleguen a estar influidas por el Pct de voto.
+
+```{r PCA}
+#Analisis de reducción de variables por PCA 
+pr.out = prcomp(DatasetCluster.esc, scale. = F)
+#Summary del analisis
+summary(pr.out)
+#Summary por individuos y variables
+pr.out2 = FactoMineR::PCA(DatasetCluster.esc, scale=F)
+summary(pr.out2)
+```
+
+El análisis mediante PCA indica que las dos primeras componentes PC1 o PC2 o dimensiones (Dim.1, Dim.2) llegan a explicar alrededor del 83.5% de la varianza del modelo, sin embargo, si escogemos las tres primeras su proporción acumulativa aumenta hasta el 95%. Estas 3 componentes poseen valores de desviación estándar mayores que 1. ¿Pero cuales son esas componentes que llegan a explicar tanto el modelo?. Acudimos por lo tanto al gráfico de variables PCA o a la tabla de variables. 
+
+El eje X horizontal representa a la Dimension 1 o PCA 1, mientras que el eje vertical Y pertenece a la Dimension 2 o PCA 2. Aquellos vectores que se sitúen a lo largo de estos ejes, o estén proximos a ellos serán las variables que conforman las componentes principales del análisis. 
+
+La dimension 1 que explica el 65% del total (eje X) estará relacionada con la variable del Pct de Voto a la Izquierda, Derecha o Otros partídos políticos. Como observamos, las flechas o vectores de estas variables están prácticamente alineadas con ese eje X. Podemos ver esto en la tabla de variables (columna de Dim.1), donde Pct Izq, Pct Dch y Pct Otros son las variables con mayor valor absoluto.
+
+La dimension 2 explica casi un 18% del total, estará relacionada con las variables de PctAbstencion, Pct Poblacion y Pct Desempleo (mayores valores absolutos en la tabla y proximidad de vectores al eje Y). Esta dimensión recoge características demográficas del conjunto y no hace hincapié en características políticas. Mientras que para PCA 1 el Pct de voto es la única relevantes, en PCA2 serán varias variables las que ejercen mayor influencia influencia. 
+
+Es por eso que realmente hablamos de 2 PC (componentes principales) que explican casi el 83.5% de la varianza total, sin embargo, estas dos PC estan recogiendo a 4 tipos de variables (sobre 10 del total) para explicar esa varianza, es ahí donde podemos ver la reducción de dimensionalidad del conjunto. Tambien podríamos añadir al estudio a la Dim. 3 para así explicar casi la totalidad de varianza, pero por el momento nos quedamos así.
+
+
+Que conclusiones podemos sacar:
+
+No encontramos ninguna CCAA que se encuentre estrechamente relacionada o se caracterize por un alto Pct de Abstención de voto, obviamente, como vemos en los gráficos, dicho Pct de Abstención se encuentra relacionado con aquellas comunidades donde el Pct de Poblacion menor a 19 años es mayor, así como en aquellas donde existe un desempleo de 25-40 años mayor.
+Las CCAA de Anadalucía, Baleares o Murcia poseen un mayor porcentaje de Desempleo menor a 25 años.
+
+Las CCAA de Castilla y León, Castilla-La Mancha, La Rioja o Aragón pertenecen al grupo de CCAA con mayor tasa de Población mayor a los 65 años, esto quizás no nos sorprende ya que forman parte del núcleo conocido como la España rural, probablemente aquí haya una menor tasa de población en relación a sus superficies. Nuestro algoritmo las ha diferenciado en base a sus características de Población sin tener en cuenta mucho su intención de voto. 
+
+Encontramos un grueso de comunidades con tendencia de voto tanto para la izquierda como hacia la derecha, son aquellas que están dispuestas a lo largo del eje X y que poseen valores tanto positivos como negativos. Estas pueden llegar a ser Madrid, Cantabria, Extremadura.. En el caso de Navarra, Galicia o la Comunidad Valenciana aparecen los primeros indicios de Pct de voto hacia partidos definidos como "Otros", mientras que Cataluña y País Vasco están totalmente clasificadas como CCAA's cuya intención de Voto no está asociada al valor de Izquierda o Derecha (posiblemente debido al porcentaje de pensamiento nacionalista de dichas comunidades).
+
+Destaca también la influencia de Galicia en el porcentaje de desempleo +40 años, podemos ver en el gráfico de variables como se encuentra casi a la par que el vector que define esta propiedad.
+
+Ceuta y Melilla por su parte se ven influenciadas a favor del Pct de voto hacia la derecha así como debido a su abstención de voto. También podrían verse separadas por una mayor tasa de desempleo menor a 25 años.
+
+
+AF o análisis factorial
+
+Por su parte, el AF busca factores que expliquen la mayor parte de la varianza común de los datos. En este análisis se distingue entre varianza común y única. La varianza común es la parte de la variación de la variable que está compartida con las otras variables y se puede cuantificar. La varianza única es la parte de la variación de la variable que se relacion con dicha variable.
+
+Antes de comenzar con el mismo, existen varios métodos que nos indican si la aplicación del AF puede llegar a concluir una buena solución respecto a la dismunicón de parámetros. Por eso aplicamos en una primera instancia el estadístico KMO, cuyo valor oscila entre [0,1]. Valores cercanos a 1 indican que la aplicación del AF es una buena idea, valores menores a 0.5 indican lo contrario.
+
+```{r test KMO, echo = FALSE}
+KMO(DatasetCluster[,-c(1)])$MSA
+```
+El estadístico KMO nos indica, mediante el valor del test, que AF puede no llegar a ser una solución válida debido a su proximidad a 0.49. Esto indica que habrá ciertas correlaciones entre los pares de variables que no pueden ser explicadas por otras variables. 
+
+Otra posibilidad para asegurarnos de su capacidad, es la aplicación del test de Barnett. 
+
+```{r, barnett}
+psych::cortest.bartlett(DatasetCluster[,-c(1)])$p.value
+```
+Aunque el valor del p-value sea significativo (< 0.05), el resultado de KMO hace que tomemos con "pinzas" el posible resultado del desarrollo de este método, tomando como solución probablemente el método de PCA.
+
+Comenzamos incluyendo un número de 2 factores propios del modelo, a partir de ahí tendremos que decidir si son suficientes o debemos aumentar dicho número. 
+
+```{r AF}
+#Análisis por AF 
+el.fa <- factanal(DatasetCluster.esc, factors=3, rotation="none", scores="regression")
+el.fa
+
+el.fa <- psych::fa(DatasetCluster.esc, nfactors=3, fm='wls',rotate="promax")
+print(el.fa, cut = 0.3)
+
+psych::fa.diagram(el.fa, simple=FALSE)
+
+```
+
+Una vez obtenidas las soluciones, comprobamos la explicación de cada uno de los modelos. Tomando como base dos dimensiones, PCA explica un valor acumulativo de varianza mayor que los dos factores de AF. Tomando 3 dimensiones, PCA explica el 95% y con 3 factores, AF el 80%. Decidimos por lo tanto tomar como solución las componentes explicatorias de la solucion PCA. 
+
+## Actualizacion del HK-Means mediante PCA
+
+Comparamos los resultados del HKmeans original el cual contaba sin reducción de componentes frente a este nuevo HKmeans mediante las dimensiones que nos ha dado como solución el PCA. Veremos si existe una diferencia de interpreteabilidad y comprensión de los grupos, ya que siempre será mejor necesitar explicar una variabilidad alta con pocas variables frente a muchas variables. 
+
+```{r comp kmeans y jerarquico frente a version con PCA}
+#Ajustamos el cluster Hybrid K-Means a la solución de tres componentes de PCA y 5 grupos
+set.seed(123)
+hc.pr = hclust(dist(pr.out$x[ ,1:2]))
+fviz_dend(hc.pr, k = 5, cex = 0.5, color_labels_by_k = T, rect = T) + ggtitle("Cluster Jerárquico con 2 PC")
+cl.hc.pr <- cutree(hc.pr, k = 5) 
+
+km.out.pr = kmeans(pr.out$x[ ,1:2],5)
+fviz_cluster(km.out.pr, data = pr.out$x[ ,1:2], ellipse.type = "convex", palette = "Set2", repel = TRUE, labelsize = 8, main = "Clustering HK-means con 2 PC")
+km.out.pr$centers
+
+#Interpretacion
+#Medidas de validación
+(medidasKMeansPCA<- medidasVal(pr.out$x[ ,1:2],km.out.pr$cluster,km.out.pr$cluster,'kmeans con solucion PCA (2)'))
+(medidasjerárquicoPCA <- medidasVal(pr.out$x[ ,1:2],cl.hc.pr,cl.hc.pr,'Jerárquico con PCA (2)'))
+(medidasKMeans <- medidasVal(DatasetCluster.esc,hkm.out$cluster,hkm.out$cluster,'hybrid k-means'))
+
+ValT<-rbind(medidasKMeansPCA,medidasjerárquicoPCA,medidasKMeans) 
+ValT
+
+```
+
+Para acabar con este documento, debemos comparar si mejoramos la interpretabilidad de ambos algorítmos de K-Means y jerárquicos obtenidos. En concreto, el par obtenido sin realizar PCA (usando todas las variables), y el par realizado después de aplicar el PCA (con dos dimensiones). 
+
+Respecto al clúster jerárquico, el obtenido mediante solución de PCA ofrece un grupo mayoritario menor (8 observaciones) respecto al orginal (9 observaciones). Este grupo ofrece observaciones muy parejas respecto a las dimensiones de intención de voto, Población, Abstención y desempleo. Es un grupo por lo tanto que recoge las características medias de todas las variables originales del dataset. El dendograma establece  diferencia de Comunidades con orientación de voto hacia "Otros" como Cataluña/País Vasco, y en menor medida Galicia, Valencia o Navarra, grupos de clúster que antes no estaban tan definidos y en el cual Navarra no estaba incluída. Mantiene a Ceuta y Melilla, así como al grupo caracterizado como grupo de la España Rural. Por lo que no hay gran diferencia respecto al dendograma con PCA y sin PCA, solamente la inclusión de Navarra en otro clúster. 
+
+La silueta media del jerárquico con PCA ronda el 0.6, mientras que el valor de WSS ronda el 664. Se tratan de los mejores obtenidos en la tabla de resultados, por lo que este algoritmo de cluster maximiza la similitud de observaciones y desimilitud de clústers de manera muy positiva frente al resto. Decimos por lo tanto que obtenemos mejor interpretabilidad para un algorítmo jerárquico de un conjunto de datos explicado mediante la reducción de componentes. 
+
+En el caso del K-Means, su versión sin aplicar solución PCA obtiene una silueta media de 0.37 y un valor de WSS cercano a 2676. Mientras que la versión con PCA mejora extraordinnariamente el valor de WSS con 1851 y una silueta un poco menor de 0.36. Los puntos de los Clústers generagos estarán mucho mas juntos, por lo que sus observaciones serán más parejas. Por lo tanto, la interpretabilidad del modelo con PCA frente al original es mejorada.
+
+
+

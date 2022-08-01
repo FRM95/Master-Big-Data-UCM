@@ -1,0 +1,498 @@
+---
+title: 'Modulo Machine Learning con R - Master UCM: Big Data, Data Science'
+author: "Miguel Moreno"
+date: "19/04/2022"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+```
+
+## Introducción
+
+En este documento tratamos algunos de los aspectos fundamentales que hemos desarrollado durante el módulo de Machine Learning en R para el concurso de datos Pump It Up: Mining the water table. Concretamente este concurso trata de establecer la mejor clasificación del tipo de bombas de agua en base a un conjunto de variables. Para ello se permite realizar cualquier modificación necesaria sobre el dataset, análisis previo, empleo de distintos algoritmos para así encontrar el mejor scoring (puntuación) de dicha clasificación. 
+
+## Resumen del proceso
+
+Se ha utilizado el esquema planteado en clase a lo largo del módulo para realizar este documento. Utilizando en primer lugar una depuración de los datos categóricos mediante transformaciones sobre strings en algunas de las variables. A continuación, realizamos varias pruebas aumentando o disminuyendo la cantidad de variables utilizadas para confeccionar el dataset final y utilizando la clasificación mediante arboles aleatorios. 
+
+En base a las distintas puntuaciones obtenidas en local o en la plataforma seguimos variando la confección pero manteniendo siempre este método de clasificación, ya que mediante XGBoost, GBM o ensamblado de modelos la puntuación en la plataforma se ve reducida (debido quizás a un overfitting del modelo generado). Se exponen en este trabajo un total de tres modificaciones, sin embargo se han llegado a realizar mas de 6 modificaciones mediante distintos algoritmos, obteniendo en todas ellas una puntuación menor a la conseguida al final del documento. 
+
+## Obtención de los datos
+
+Los datos han sido descargados a través de la web Driven Data, donde podemos practicar e incluso participar en competiciones con distintos tipos de datos. Por lo que descargamos los datasets de la competición los cuales están divididos en Training, Test y valor de la Variable a predecir. Se hace uso de distintos paquetes de librerías usados a lo largo del módulo de Data Mining o Machine Learning en R. De igual manera, usamos algunas funciones proporcionadas en el módulo de Data Mining para optimizar los resultados. 
+
+```{r obtencion datos, include=FALSE}
+#Cambiamos el workspace
+setwd('C:/Users/Miguel/Documents/MASTER BIG DATA UCM/Modulos/9 - Machine learning R-Python/Machine learning con R')
+#Adjuntamos las funciones de data mining
+source('Funciones_R.R')
+```
+
+```{r obtencion datos1, include=FALSE}
+#Librerias a utilizar
+library(dplyr)    
+library(data.table)  
+library(tidytable)   
+library(inspectdf)   
+library(ranger)      
+library(tibble)     
+library(magrittr)    
+library(ggplot2)    
+library(forcats)
+library(dplyr)       
+library(missRanger)  
+library(janitor)     
+library(stringi)    
+library(Hmisc)
+library(stringr)
+library(h2o)
+library(corrplot)
+library(car)
+library(psych)
+library(kableExtra)
+library(gridExtra)
+library(DMwR2)
+```
+
+```{r obtencion datos2}
+#Importamos los datasets asociados al test, training y dependiente
+datTestOri <- read.csv('pumpDataTest.csv') 
+datTrainOri <- read.csv('pumpDataTrain.csv') 
+datTrainLabOri <- read.csv('pumpTrainLabels.csv')
+```
+
+## Inspección de los datos
+
+Realizamos una inspección de los datos de Train para poder obtener una visión de las variables:
+
+```{r inspeccion, echo=FALSE}
+#Obtenemos una vision previa
+str(datTrainOri)
+
+#Cantidad de valores NA
+sum(is.na(datTrainOri))
+```
+
+Como observamos, el número de NA's obtenido es 0, lo que alivia nuestro trabajo en gran medida. Por otra parte, no hemos obtenido variables mal codificadas, por lo que quizás a lo sumo haya que realizar pequeñas conversiones sobre algunas columnas.
+
+## Pasos previos
+
+Aplicamos algunas operaciones a las variables del dataset. Ya sea debido a la duplicidad de columnas, valores muy similares en ellas, tipos de variables erróneos... No existe un criterio único para operar, las transformaciones son a gusto del desarrollador. 
+
+En primer lugar comenzamos con las variables categóricas observando el número de niveles de cada una de ellas y escogiendo aquellas que no superen los 2.500 niveles.
+
+```{r pasos previos}
+#Analizamos las columnas categoricas
+datCates <- rbind(datTrainOri, datTestOri) %>%
+  select.(where(is.character)) %>%
+  mutate.(across.(where(is.character), ~ length(unique(.)))) %>%
+  distinct.() %>% 
+  t() %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "variables") %>%
+  rename.(niveles = V1) %>%
+  arrange.(niveles) %>%
+  as.data.table()
+
+#Unimos ambos datasetes train y test para aplicar los cambios
+datModel <- rbind(datTrainOri, datTestOri)
+
+#Seleccionamos las columnas filtrando el numero de niveles en 2.500
+cols_god <- datCates %>%
+  filter.(niveles <= 2500 & niveles > 1) %>%
+  select.(variables) %>%
+  pull.()
+
+#Seleccionamos aquellas con esa cantidad de niveles
+datModel %<>%
+  select.(where(is.numeric) | where(is.logical) | all_of(cols_god)) %>%
+  mutate.(across.(where(is.logical), ~ as.numeric(.))) %>%
+  as.data.frame()
+
+datCates
+```
+
+Ahora disponemos de un dataset llamado datModel() donde tenemos todos los valores del Training y Test con un total de 36 variables. Comenzamos a realizar modificaciones en aquellas que consideremos. 
+
+
+## Análisis de columnas categóricas
+
+Establecemos unos criterios generales en todas las variables de este tipo tales como: uso de minúsculas para agrupar posibles valores que pudieran diferir, cambio de todos aquellos campos vacíos " ", valores con categoría "not known" o incluso caracteres no cualitativos como son "0" o "-", todos ellos bajo un mismo valor nuevo "unknown".
+
+```{r Modificaciones cat}
+#Minusculas y valores inconclusos a unknown
+datModel %<>%
+  mutate.(across.(where(is.character), ~ tolower(.))) %>%
+  mutate.(across.(where(is.character), ~ replace(. , . == "", "unknown"))) %>%
+  mutate.(across.(where(is.character), ~ replace(. , . == "not known", "unknown"))) %>%
+  mutate.(across.(where(is.character), ~ replace(. , . == "0", "unknown"))) %>%
+  mutate.(across.(where(is.character), ~ replace(. , . == "-", "unknown"))) 
+```
+
+Hemos comprobado que podemos realizar pequeñas modificaciones a variables de tipo String en las columnas categóricas. Aplicamos un criterio similar para algunas de las columnas categóricas restantes modificando ciertos aspectos de su cadena de caracteres.
+
+```{r Modificaciones cat2}
+#Visualizacion de strings similares mediante paquete stringr, tambien es valido str_detect
+unique(str_subset(datModel$funder,"^gove"))
+unique(str_subset(datModel$installer,"^gove"))
+
+#Bucle que recorre posibles valores similares y los unifica
+for (i in c("gove","gover","govern","governme","goverm","governmen")) {
+  y2 <- datModel$installer == i
+  datModel$installer[y2] <- "government"
+}
+
+#Transformamos mas caracteres que puedan generar solapacion entre categorias
+datModel %<>%
+  mutate.(across.(where(is.character), ~ stri_replace_all_fixed(. , " ", ""))) %>%
+  mutate.(across.(where(is.character), ~ stri_replace_all_fixed(. , c(".","-","_","&","/","(",")"), "", vectorize_all = FALSE))) %>%
+  mutate.(across.(where(is.character), ~ stri_replace_all_fixed(. , " ", ""))) 
+```
+
+Continuamos revisando las columnas categóricas sin adentrarnos en las numéricas. Podemos observar que el número de apariciones en las variables region y region_code es distinto, sin mucho sentido, podríamos aplicar un drop de la variable region y reservar unicamente su tipo numérico (region_code). Así mismo, hemos encontrado algunas variables que comparten valores muy similares o incluso llegan a estar duplicadas. 
+
+Procederemos a eliminarlas, reduciendo así el número de variabes del dataset. 
+
+```{r Modificaciones cat3}
+#Eliminamos aquellas columnas "duplicadas"
+datModel$quantity_group <- NULL
+datModel$waterpoint_type_group <- NULL
+datModel$payment_type <- NULL
+```
+
+## Análisis de columnas numéricas
+
+A continuación realizamos una evaluación similar para este tipo de variables. Imputación sobre los valores atípicos, reescalado de valores numéricos, paso a valores logarítmicos para normalizar distrbuciones... son algunas de las modificaciones que se suelen realizar en el proceso de minado de datos. 
+
+¿Existe alguna columna que posea valores atípicos?. Mediante un diagrama de cajas y bigotes podemos hacernos una idea de como está la situación. 
+
+```{r visualizacion, echo=FALSE}
+#dataset auxiliar
+datNumeric <- datModel %>%
+  select.(where(is.numeric))
+
+listaGraf <- dfplot_box(as.data.frame(datNumeric[,-c(1)]))
+listaGraf2 <- dfplot_his(as.data.frame(datNumeric[,-c(1)]))
+
+gridExtra::marrangeGrob(listaGraf, nrow = 3, ncol = 3)
+gridExtra::marrangeGrob(listaGraf2, nrow = 3, ncol = 3)
+
+rm(datNumeric, listaGraf, listaGraf2)
+```
+
+Como podemos observar en los gráficos superiores, existe un grado alto de outliers en las variables amount_tsh, lattitude, district_code y region_code. Además, se realizó a lo largo de las diferentes versiones un escalado y normalización para disminuir la asimetría de algunas de ellas, no consiguiendo en ningún momento mejorar el score en la plataforma. 
+
+Además, es un dataset conformado mayoritariamente por variables categóricas, por lo que optamos por no tratar estos outliers para no variar mucho sus distribuciones. 
+
+
+## Aplicación del modelo
+
+Una vez aplicadas todas las transformaciones sobre datModel debemos separar los datos de nuevo en dos datasets distintos para realizar nuestra parte de entrenamiento del modelo y aplicar las predicciones sobre la parte de test.
+
+```{r random forest}
+#Volvemos a generar el dataset de train
+datTrain <- datModel %>%
+            filter.(datModel$id == datTrainOri$id) %>%
+            mutate.(status_group = as.factor(datTrainLabOri$status_group)) %>%
+            as.data.frame()
+
+#Volvemos a generar el sataset de test
+datTest <- datModel %>%
+            filter.(datModel$id == datTestOri$id) %>%
+            as.data.frame()
+```
+
+Utilizamos como hemos comentado al inicio, un modelo basado en Random Forest sobre el dataset de train para entrenar el modelo. 
+
+```{r random forest1}
+#Creacion del modelo
+mitrain <- copy(datTrain)
+mymodel <- ranger(
+  status_group ~. ,
+  data = mitrain,
+  importance = 'impurity',
+  num.trees  = 550,
+  mtry       = 6
+)
+```
+
+Medimos la precisión del modelo generado y establecemos un nuevo objeto que mide la importancia de las variables.
+
+```{r random forest2}
+#Evaluamos la precision del modelo
+accu_val <- 1 - mymodel$prediction.error
+accu_val
+
+#Tabla de variables e importancia
+varImp <- mymodel$variable.importance %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "variables") %>%
+  rename.(importancia = 2) %>%
+  arrange.(-importancia) %>% 
+  as.data.table()
+```
+
+Generamos una representación del modelo mediante el uso de la librería ggplot():
+
+```{r random forest3}
+#Creacion del grafico
+ggplot(varImp[-4,], aes(fct_reorder(variables, importancia), importancia, alpha = importancia)) +
+  geom_col(group = 1, fill = "darkred") +
+  coord_flip() +
+  labs( 
+    title = "Importancia de la variable",
+    subtitle = paste("(Precision: ", round(accu_val*100,2), "%)", sep = ""),
+    x = "Variable",
+    y = "Importancia relativa"
+  ) +
+  theme_bw()
+```
+
+## Predicción del modelo
+
+Como último paso, realizamos la predicción de la funcionalidad de las bombas de agua sobre los datos de test. Tras esto, subiremos los resultados a la competición en Data Driven para comprobar como de positiva ha sido la clasificación.  
+
+```{r prediccion}
+#Creamos la prediccion
+pred <- predict(mymodel, datTest)$predictions
+
+#Objeto generado con el Id y el Valor de la bomba
+tosubmit <- data.frame(id = datTest$id, status_group = pred)
+
+#Generamos el csv con el formato adecuado para la plataforma
+fwrite( 
+  tosubmit, 
+  paste("C:/Users/Miguel/Documents/MASTER BIG DATA UCM/Modulos/9 - Machine learning R-Python/Machine learning con R/mlTry1_", ncol(datModel), "_acc_", floor(accu_val*10000), ".csv", sep = "")
+)
+```
+
+El valor obtenido en la web Data Driven ha sido:
+
+![Puntuación obtenida en la primera entrega](C:/Users/Miguel/Documents/MASTER BIG DATA UCM/Modulos/9 - Machine learning R-Python/Machine learning con R/try1.png){#id .class width=70% height=70%}
+El valor obtenido no ha sido del todo negativo, a partir de este punto se realizan las mejoras sobre el proceso anterior. Manteniendo algunos aspectos y cambiando otros.
+
+
+## Mejora del modelo 
+
+Volvemos a repetir los pasos realizados anteriormente y partimos del dataset datModel(). En esta mejora número 2, trataremos de recoger aquellas variables que poseen una cantidad menor o igual a 1.000 niveles.
+
+```{r Mejora del modelo}
+#Unimos ambos datasetes train y test para aplicar los cambios despues de ejecutar enetregaMachLearn
+datModel <- rbind(datTrainOri, datTestOri)
+
+#Seleccionamos las columnas filtrando el numero de niveles en 1000
+cols_god <- datCates %>%
+  filter.(niveles <= 1000 & niveles > 1) %>%
+  select.(variables) %>%
+  pull.()
+
+cols_god
+
+#Seleccionamos aquellas con esa cantidad de niveles
+datModel %<>%
+  select.(where(is.numeric) | where(is.logical) | all_of(cols_god)) %>%
+  mutate.(across.(where(is.logical), ~ as.numeric(.))) %>%
+  as.data.frame()
+```
+
+De igual manera, se aplican las modificaciones de tipo String como anteriormente se ha realizado (líneas 127 - 154 de código).
+
+```{r include=FALSE}
+#Minusculas y valores inconclusos a unknown
+datModel %<>%
+  mutate.(across.(where(is.character), ~ tolower(.))) %>%
+  mutate.(across.(where(is.character), ~ replace(. , . == "", "unknown"))) %>%
+  mutate.(across.(where(is.character), ~ replace(. , . == "not known", "unknown"))) %>%
+  mutate.(across.(where(is.character), ~ replace(. , . == "0", "unknown"))) %>%
+  mutate.(across.(where(is.character), ~ replace(. , . == "-", "unknown"))) 
+
+#Transformamos mas caracteres que puedan generar solapacion entre categorias
+datModel %<>%
+  mutate.(across.(where(is.character), ~ stri_replace_all_fixed(. , " ", ""))) %>%
+  mutate.(across.(where(is.character), ~ stri_replace_all_fixed(. , c(".","-","_","&","/","(",")"), "", vectorize_all = FALSE))) %>%
+  mutate.(across.(where(is.character), ~ stri_replace_all_fixed(. , " ", ""))) 
+
+#Eliminamos aquellas "duplicadas"
+datModel$quantity_group <- NULL
+datModel$waterpoint_type_group <- NULL
+datModel$payment_type <- NULL
+
+#Volvemos a generar el dataset de train
+datTrain <- datModel %>%
+  filter.(datModel$id == datTrainOri$id) %>%
+  mutate.(status_group = as.factor(datTrainLabOri$status_group)) %>%
+  as.data.frame()
+
+#Volvemos a generar el sataset de test
+datTest <- datModel %>%
+  filter.(datModel$id == datTestOri$id) %>%
+  as.data.frame()
+```
+
+El modelo de clasificación ejecutado vuelve a ser del tipo Random Forest, aumentando el número de árboles a 600 y manteniendo el mtry = 6. Nuestro valor de precisión del modelo en local ha sido de:
+
+```{r}
+#Creacion del modelo
+mitrain <- copy(datTrain)
+set.seed(1234)
+mymodel <- ranger(
+  status_group ~. ,
+  data = mitrain,
+  importance = 'impurity',
+  num.trees  = 600,
+  mtry  = 6
+)
+
+#Evaluamos la precision del modelo
+accu_val <- 1 - mymodel$prediction.error
+accu_val
+
+#Creamos la prediccion
+pred <- predict(mymodel, datTest)$predictions
+```
+
+El valor obtenido en la web Data Driven ha sido:
+  
+![Puntuación obtenida en la segunda entrega (v2)](C:/Users/Miguel/Documents/MASTER BIG DATA UCM/Modulos/9 - Machine learning R-Python/Machine learning con R/try2.png){#id .class width=70% height=70%}
+
+## Nueva mejora sobre el modelo 
+
+Revertimos la situación de las variables escogidas para conformar nuestro dataset. Esta vez, escogeremos aquellas que posean una cantidad menor o igual a 3.000 niveles. Reduciremos esta cantidad mediante una fase de lumping.
+
+```{r seleccion niveles}
+#Unimos ambos datasetes train y test para aplicar los cambios
+datModel <- rbind(datTrainOri, datTestOri)
+
+#Seleccionamos las columnas filtrando el numero de niveles en 2.500
+cols_god <- datCates %>%
+  filter.(niveles <= 3000 & niveles > 1) %>%
+  select.(variables) %>%
+  pull.()
+```
+
+```{r include=FALSE}
+#Seleccionamos aquellas con esa cantidad de niveles
+datModel %<>%
+  select.(where(is.numeric) | where(is.logical) | all_of(cols_god)) %>%
+  mutate.(across.(where(is.logical), ~ as.numeric(.))) %>%
+  as.data.frame()
+```
+
+Añadimos esta vez una imputación previa de todos los valores vacíos. 
+```{r}
+#Imputacion de NA's con RandomForest
+datModel <- missRanger(datModel, pmm.k = 3, num.trees = 200)
+```
+
+A partir de aquí, realizamos de nuevo las mismas modificaciones que en los dos casos anteriores, modificación de strings extraños en el dataset, eliminación de columnas duplicadas..
+
+```{r include=FALSE}
+#Minusculas y valores inconclusos a unknown
+datModel %<>%
+  mutate.(across.(where(is.character), ~ tolower(.))) %>%
+  mutate.(across.(where(is.character), ~ replace(. , . == "", "unknown"))) %>%
+  mutate.(across.(where(is.character), ~ replace(. , . == "not known", "unknown"))) %>%
+  mutate.(across.(where(is.character), ~ replace(. , . == "0", "unknown"))) %>%
+  mutate.(across.(where(is.character), ~ replace(. , . == "-", "unknown"))) 
+
+#Transformamos mas caracteres que puedan generar solapacion entre categorias
+datModel %<>%
+  mutate.(across.(where(is.character), ~ stri_replace_all_fixed(. , " ", ""))) %>%
+  mutate.(across.(where(is.character), ~ stri_replace_all_fixed(. , c(".","-","_","&","/","(",")"), "", vectorize_all = FALSE))) %>%
+  mutate.(across.(where(is.character), ~ stri_replace_all_fixed(. , " ", ""))) 
+
+#Bucle que recorre posibles valores similares y los unifica
+for (i in c("gove","gover","govern","governme","goverm","governmen")) {
+  y2 <- datModel$installer == i
+  datModel$installer[y2] <- "government"
+}
+```
+
+Introducimos la nueva modificación antes mencionada, una fase de lumping para categorizar como 'other' a todos los valores que excepto a los n más frecuentes. El valor de n se ha decidido en base a la distribución de los niveles en estas columnas. Nos dimos cuenta que pese a reducir el número de niveles en scheme_name, su valor más representativo sería 'unknown', por lo que la eliminamos finalmente. 
+
+```{r}
+#Fase de lumping
+datModel %<>%
+  mutate.(ward = fct_lump_n(ward, n = 380, other_level = 'other')) %>%
+  mutate.(funder = fct_lump_n(funder, n = 380, other_level = 'other')) %>%
+  mutate.(installer = fct_lump_n(installer, n = 380, other_level = 'other')) %>%
+  mutate.(scheme_name = fct_lump_n(scheme_name, n = 380, other_level = 'other')) %>%
+  mutate.(across.(where(is.factor), ~ as.character(.)))
+
+#Eliminamos la columna ya que la mayoria de niveles son desconocidos
+datModel$scheme_name <- NULL
+
+#Eliminamos aquellas "duplicadas"
+datModel$quantity_group <- NULL
+datModel$waterpoint_type_group <- NULL
+datModel$payment_type <- NULL
+
+#Nuevas variables y niveles
+datModel %>% 
+  select.(where(is.character)) %>%
+  mutate.(across.(where(is.character), ~length(unique(.)))) %>%
+  distinct.() %>%
+  arrange(desc('V1')) %>%
+  t() %>%
+  as.data.frame()
+```
+
+Como observamos, tenemos mayor cantidad de variables que pueden explicar la clasificación pero reduciendo la cantidad de niveles totales. Tras generar el conjunto de datos Train y Test, el modelo de clasificación ejecutado vuelve a ser del tipo Random Forest, con número de árboles a 600 y manteniendo el mtry = 6. Nuestro valor de precisión del modelo en local ha sido de:
+
+```{r echo=FALSE}
+#Volvemos a generar el dataset de train
+datTrain <- datModel %>%
+  filter.(datModel$id == datTrainOri$id) %>%
+  mutate.(status_group = as.factor(datTrainLabOri$status_group)) %>%
+  as.data.frame()
+
+#Volvemos a generar el sataset de test
+datTest <- datModel %>%
+  filter.(datModel$id == datTestOri$id) %>%
+  as.data.frame()
+
+```
+
+```{r}
+#Creacion del modelo mediante randomForest
+mitrain <- copy(datTrain)
+set.seed(1234)
+mymodel <- ranger(
+  status_group ~. ,
+  data = mitrain,
+  importance = 'impurity',
+  num.trees  = 600,
+  mtry       = 6
+)
+
+#Evaluamos la precision del modelo con RF
+accu_val <- 1 - mymodel$prediction.error
+accu_val
+
+#Creamos la prediccion
+pred <- predict(mymodel, datTest)$predictions
+```
+
+
+El valor obtenido en la web Data Driven ha sido:
+  
+![Puntuación obtenida en la tercera entrega (v3)](C:/Users/Miguel/Documents/MASTER BIG DATA UCM/Modulos/9 - Machine learning R-Python/Machine learning con R/try3.png){#id .class width=70% height=70%}
+
+Terminamos aquí las mejoras sbre el dataset generado, ya que si bien aumentamos el nivel de precisión respecto a la versión en local, la plataforma nos ofrece un resultado menor, disminuyendo en algunas ocasiones a valores de 0.80 incluso 0.77, indicativo probablemente de un overfitting del modelo. 
+
+## Planteamientos futuros 
+
+Tras observar la versión ganadora del concurso que realiza un ensamblado de RandomForest, GBM y XGBoost, no llego a comprender muy bien porqué utilizando estos métodos de clasificación por separado sumado a cambios sobre las variable categóricas obtenemos valores inferiores.
+
+Esto quizás se debe a las modificaciones spobre strings tan exactas que hemos realizado sobre algunas de las variables. Además, se hizo mucho hincapié en el modelo XGBoost, ya que era el más utilizado en el foro de dicusiones y los resultados arrojaban valores muy inferiores al obtenido en la versión 3 de las mejoras.
+
+Es posible que sea necesario realizar cambios en las variables numéricas, sin embargo, no me llega a convencer unir categorías como la longitud/latitud o el número de población, ya que estas tienen un alto grado de importancia respecto a la variable predictora como vimos en el gráfico de barras. 
+
+Un planteamiento futuro sería realizar un modelo basado en XGBoost con una cantidad de variables que ronda los 3.000 niveles pero mantiendo un lumping cercano al generado, obteniendo previamente y de manera concreta el número de eta, profundidad de búsqueda y número de rounds para no realizar un overfitting. De igual manera, se puede realizar un análisis de componentes (PCA) previo para observar que variables debemos escoger.
+
+Todo esto se realizó de igual manera mediante la función de automl() del paquete h2o, obteniendo scorings inferiores al obtenido.
+

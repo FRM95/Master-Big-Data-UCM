@@ -1,0 +1,138 @@
+---
+title: "Ejercicios sobre Funciones incluyendo temas anteriores"
+author: "Programación en R - Máster Big Data & Data Science"
+date: "08/10/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Ejercicio 1. 
+
+Un país tiene monedas de 1 U, 5 U y 25 U. Si tenemos una cierta cantidad de dinero en una variable, diseñar una funció para dar el cambio óptimo (usando el mínimo número de monedas) en las monedas descritas. La función debe adaptarse al siguiente esqueleto. Para devolver el resultado, debe devolver **un vector** de 3 elementos de tipo entero, de manera que en la posición 1 se indique el número necesario de monedas de 25 U, en la posición 2 el número de monedas de 5 U, y en la posición 3 el número de monedas de 1 U.
+Se pide:
+
+* Implementar la función tal como se indica en el enunciado
+* Implementar una segunda versión `cambio.monedas.mejorado` que controle si el argumento
+es un número negativo, y en ese caso, devuelva NULL sin realizar ningún cálculo
+* Implementar una tercera versión `cambio.monedas.general` que reciba un segundo argumento
+`monedas` que sea un vector de enteros con los distintos tipos de monedas que existen
+en el país. En el ejemplo anterior el argumento sería `monedas = c(25, 5, 1)` pero debe
+funcionar para cualquier estructura de monedas y ser capaz de calcular el cambio con esa estructura. PISTA: utilizar un bucle `for` que recorra las monedas existentes. El cuerpo del bucle debería parecerse mucho a la solución del primer apartado del ejercicio. OJO: no es correcto asumir que el argumento de monedas ya venga ordenado de ninguna forma en especial. En el caso anterior podríamos tener `monedas = c(1, 25, 5)`, por lo que conviene empezar ordenando ese vector.
+
+```{r ej1}
+cambio.monedas <- function(cantidad){
+  # escribe aquí todo el código que necesites (pista: 6 líneas de código)
+  return(NULL)
+}
+
+cambio.monedas.mejorado <- function(cantidad){
+  # escribe aquí todo el código que necesites
+  return(NULL)
+}
+
+cambio.monedas.general <- function(cantidad, monedas){
+  # escribe aquí todo el código que necesites
+  return(NULL)
+}
+
+```
+
+
+
+```{r ej1-tests}
+# Ejecuta esta celda de tests para comprobar tu solución
+stopifnot(all(cambio.monedas(537) == c(21, 2, 2)))
+stopifnot(all(cambio.monedas(26) == c(1, 0, 1)))
+stopifnot(is.null(cambio.monedas.mejorado(-537)))
+stopifnot(all(cambio.monedas.general(537, c(25, 5, 1)) == c(21, 2, 2)))
+stopifnot(all(cambio.monedas.general(537, c(5, 25, 1)) == c(21, 2, 2)))
+stopifnot(all(cambio.monedas.general(27, c(10, 5, 2, 1)) == c(2, 1, 1, 0)))
+stopifnot(all(cambio.monedas.general(27, c(1, 5, 2, 10)) == c(2, 1, 1, 0)))
+```
+
+### Ejercicio 2
+
+* Escribir una función que reciba una cadena de caracteres y cambie la k-ésima letra por la letra que le pasemos como segundo argumento, siendo k el tercer argumento. Debe ajustarse al siguiente esqueleto. PISTA: consulta la ayuda de la función `substr`. Se puede utilizar también en la parte izquierda, para reemplazar caracteres: `substr(...) = algo`.
+* Invocarla para reemplazar en la cadena "Hola" la H por una M y almacenar el resultado
+devuelto por la función en la variable `reemplazada`.
+* Utilizando sapply, invocarla sobre el vector `c("Juan", "bala", "cala")` reemplazando siempre la segunda letra por la letra "o". Almacenar el resultado en la variable `vec.reemp`.
+
+```{r ej2}
+reemplazar <- function(cadena, letra, k){
+  # escribe aquí el código de la función (pista: una sola línea de código)
+  return(NULL)
+}
+reemplazada = NULL  # modifica NULL para invocar a la función
+vec.reemp = NULL
+```
+
+
+```{r ej2-tests}
+stopifnot(reemplazar("pepe", "o", 2) == "pope")
+stopifnot(reemplazar("pepe", "S", 1) == "Sepe")
+stopifnot(reemplazada == "Mola")
+stopifnot(all(vec.reemp == c("Joan", "bola", "cola")))
+```
+
+### Ejercicio 3
+Implementar una función que devuelva el vector de 2 soluciones de una ecuación de segundo grado si tiene raíces reales, y devuelva NULL si tiene raíces complejas (no reales), lo cual ocurre cuando lo que hay dentro de la raíz (el `discrimante` $b^2-4ac$) es negativo. Recuerda que la fórmula para resolver la ecuación $$a x^2 + b x + c = 0$$ es
+$$x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}$$
+donde si aplicamos el signo + obtenemos una solución y si aplicamos - obtendremos la otra.
+
+```{r ej3}
+resolver <- function(a, b, c){
+  if(b^2-4*a*c<0){
+      return(NULL)
+  }
+  else{
+      x1 = (-b+(sqrt(b^2-4*a*c))/2*a)
+      x2 = (-b-(sqrt(b^2-4*a*c))/2*a)
+      return(c(x1,x2))
+  }
+}
+```
+
+
+```{r ej3-tests}
+stopifnot(all(c(3, 2) %in% resolver(2, -10, 12)))
+stopifnot(is.null(resolver(2, -10, 22)))
+```
+
+### Ejercicio 4
+Implementar una función que, utilizando un bucle while, repita el experimento de lanzar una moneda trucada (es decir, extraiga un número aleatorio entre 0 y 1 con distribución uniforme) hasta obtener exactamente k resultados "cara", siendo k el primer argumento de la función (asumiendo que siempre será k > 0). La función debe devolver el número de experimentos que ha necesitado hacer (el número de veces que se ha repetido el lanzamiento de la moneda, es decir, el número de iteraciones realizadas en el while). La moneda está trucada porque la probabilidad de obtener cara no es de 0.5 sino que se indica como segundo argumento (en tanto por uno, es decir entre 0 y 1) a la función. PISTA: consulta la documentación de `runif` y también de `set.seed`, el cual es necesario para poder hacer reproducible el resultado pseudo-aleatorio que obtienes. La semilla que pasaremos a set.seed debe ser el tercer argumento de la función.
+
+PISTA: si el aleatorio obtenido entre 0 y 1 es menor o igual que pcara, se considera que ha salido cara.
+
+```{r ej4}
+lanzar.moneda <- function(k, pcara, semilla){
+  set.seed(semilla)
+  # resto de tu código
+  return(NULL)
+}
+```
+
+
+```{r ej4-tests}
+stopifnot(lanzar.moneda(10, 0.3, 123) == 40)
+stopifnot(lanzar.moneda(10, 0.3, 1234) == 23)
+stopifnot(lanzar.moneda(10, 0.3, 12345) == 45)
+```
+
+La siguiente figura muestra un histograma con la frecuencia de aparición de cada
+número de lanzamientos necesarios para conseguir 10 resultados cara en una moneda con
+pcara = 0.3 cuando se hacen 1000 llamadas a la función anterior, cada vez con
+una semilla distinta. Las 1000 semillas usadas han sido los números del 1 al 1000.
+
+Para los curiosos: la variable aleatoria X = número de intentos para conseguir k éxitos sigue una [distribución binomial negativa](https://es.wikipedia.org/wiki/Distribuci%C3%B3n_binomial_negativa), que es una distribución de probabilidad discreta cuya función masa de probabilidad sigue una forma que se aproxima a la del histograma.
+
+```{r ej4-hist}
+hist(sapply(1:1000, lanzar.moneda, k = 10, pcara = 0.3), 
+     main = "Número de lanzamientos necesarios", 
+     xlab = "Número de iteraciones (lanzamientos)")
+```
+
+
+
