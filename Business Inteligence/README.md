@@ -7,7 +7,7 @@ It is necessary to have a version of Tableau to use it.
 
 Running: Open the data dashboard (LibroMiguelMoreno.twb/twbx) using the Tableau application. You may need to set the database preemptively through the built-in dataset.
 
-# Business Inteligence con Tableau Desktop y Tableau Web
+# Business Intelligence con Tableau Desktop y Tableau Web
 
 Creación y diseño de un tablón de datos mediante tableau.
 
